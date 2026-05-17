@@ -16,7 +16,11 @@ export async function GET() {
       *,
       items:pack_items(
         *,
-        product:products(*)
+        product:products(
+          *,
+          category:categories(*),
+          variants:product_variants(*)
+        )
       )
     `)
     .order('name')
