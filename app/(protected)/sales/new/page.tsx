@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ShoppingCart, Plus, Minus, Trash2, Package, Check,
@@ -40,6 +40,36 @@ export default function NewSalePage() {
   const [showSuccess, setShowSuccess] = useState(false)
   const [saleNotes, setSaleNotes] = useState('')
   const [saleError, setSaleError] = useState('')
+
+  // Auto-refresco de stock cada 30 segundos + al volver a la pestaña
+  const refetchAll = useCallback(() => {
+    refetchProducts()
+    refetchPacks()
+  }, [refetchProducts, refetchPacks])
+
+  useEffect(() => {
+    const interval = setInterval(refetchAll, 30_000)
+    const handleVisibility = () => { if (document.visibilityState === 'visible') refetchAll() }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [refetchAll])
+
+  // Swipe horizontal para cambiar de tab
+  const touchStartX = useRef<number | null>(null)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX
+  }
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null) return
+    const delta = e.changedTouches[0].clientX - touchStartX.current
+    touchStartX.current = null
+    if (Math.abs(delta) < 50) return
+    if (delta < 0 && tab === 'products') setTab('packs')
+    if (delta > 0 && tab === 'packs') setTab('products')
+  }
 
   const handleConfirmSale = async () => {
     if (cart.items.length === 0) return
@@ -139,7 +169,11 @@ export default function NewSalePage() {
       </div>
 
       {/* ── Contenido de tabs ── */}
-      <div className="flex-1 overflow-y-auto p-3">
+      <div
+        className="flex-1 overflow-y-auto p-3"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
         {tab === 'products' ? (
           loadingProducts ? <LoadingSpinner /> : products.length === 0 ? (
             <EmptyState icon={<Package size={40} />} text="No hay productos activos" />
