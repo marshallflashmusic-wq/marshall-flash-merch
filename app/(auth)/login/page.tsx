@@ -89,7 +89,7 @@ export default function LoginPage() {
         {/* MODO VENTA — con PIN */}
         <div className="flex flex-col gap-3">
           <button
-            onClick={() => { setShowTpvForm(v => !v); setTpvError('') }}
+            onClick={() => { setShowTpvForm(v => !v); setShowAdminForm(false); setTpvError('') }}
             className="w-full bg-white hover:bg-zinc-100 active:bg-zinc-200 rounded-3xl p-7 flex flex-col items-center gap-3 transition-all duration-100 tap-scale shadow-2xl shadow-white/10"
           >
             <Zap size={44} className="text-black" strokeWidth={2.5} fill="currentColor" />
@@ -143,7 +143,7 @@ export default function LoginPage() {
         {/* Acceso Admin — colapsable */}
         <div className="flex flex-col gap-3">
           <button
-            onClick={() => setShowAdminForm(v => !v)}
+            onClick={() => { setShowAdminForm(v => !v); setShowTpvForm(false); setTpvError('') }}
             className="flex items-center justify-center gap-2 py-2.5 text-zinc-500 hover:text-zinc-300 transition-colors text-sm"
           >
             <Lock size={14} />
