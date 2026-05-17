@@ -36,11 +36,20 @@ export function useProducts() {
     }
   }, [])
 
+  // Actualización optimista: descuenta stock localmente sin esperar red
+  const patchStocks = useCallback((decrements: { product_id: string; qty: number }[]) => {
+    setProducts(prev => prev.map(p => {
+      const d = decrements.find(x => x.product_id === p.id)
+      return d ? { ...p, stock: Math.max(0, p.stock - d.qty) } : p
+    }))
+  }, [])
+
   useEffect(() => {
     load()
     const supabase = createClient()
+    // Mismo canal que el emisor en useSales ('merch-sync')
     const channel = supabase
-      .channel('merch-sync-products')
+      .channel('merch-sync')
       .on('broadcast', { event: 'sale' }, () => load())
       .subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -60,7 +69,7 @@ export function useProducts() {
     }
   }
 
-  return { products, loading, error, refetch: load, updateStock }
+  return { products, loading, error, refetch: load, updateStock, patchStocks }
 }
 
 export function useAllProducts() {
@@ -82,7 +91,7 @@ export function useAllProducts() {
     load()
     const supabase = createClient()
     const channel = supabase
-      .channel('merch-sync-all-products')
+      .channel('merch-sync')
       .on('broadcast', { event: 'sale' }, () => load())
       .subscribe()
     return () => { supabase.removeChannel(channel) }

@@ -37,8 +37,9 @@ export function usePacks() {
   useEffect(() => {
     loadPacks()
     const supabase = createClient()
+    // Mismo canal que el emisor en useSales ('merch-sync')
     const channel = supabase
-      .channel('merch-sync-packs')
+      .channel('merch-sync')
       .on('broadcast', { event: 'sale' }, () => loadPacks())
       .subscribe()
     return () => { supabase.removeChannel(channel) }

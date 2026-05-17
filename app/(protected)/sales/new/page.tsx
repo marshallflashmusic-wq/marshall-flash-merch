@@ -31,7 +31,7 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: React.Elemen
 
 export default function NewSalePage() {
   const router = useRouter()
-  const { products, loading: loadingProducts, refetch: refetchProducts } = useProducts()
+  const { products, loading: loadingProducts, refetch: refetchProducts, patchStocks } = useProducts()
   const { packs, loading: loadingPacks, refetch: refetchPacks } = usePacks()
   const { createSale, loading: creating } = useSales()
   const cart = useCartStore()
@@ -65,12 +65,32 @@ export default function NewSalePage() {
   const handleConfirmSale = async () => {
     if (cart.items.length === 0) return
     setSaleError('')
-    const result = await createSale(cart.items, cart.paymentMethod, null, saleNotes || undefined)
+
+    // Capturar los ítems antes de limpiar el carrito
+    const soldItems = cart.items
+
+    const result = await createSale(soldItems, cart.paymentMethod, null, saleNotes || undefined)
     if (result.success) {
+      // Actualización optimista: reflejar el stock vendido al instante, sin esperar red
+      const decrements = soldItems.flatMap(item => {
+        if (item.type === 'product' && item.product) {
+          return [{ product_id: item.product.id, qty: item.quantity }]
+        }
+        if (item.type === 'pack' && item.pack?.items) {
+          return item.pack.items.map(pi => ({
+            product_id: pi.product_id,
+            qty: pi.quantity * item.quantity,
+          }))
+        }
+        return []
+      })
+      patchStocks(decrements)
+
       setShowConfirm(false)
       setShowSuccess(true)
       cart.clearCart()
       setSaleNotes('')
+      // Refetch en segundo plano para confirmar datos reales de BD
       refetchProducts()
       refetchPacks()
       setTimeout(() => setShowSuccess(false), 2200)

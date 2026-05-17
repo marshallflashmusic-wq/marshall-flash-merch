@@ -119,11 +119,17 @@ export function useSales() {
 
       const { sale } = await res.json()
 
-      // Notificar a todos los dispositivos conectados para que refresquen el stock
+      // Notificar a todos los dispositivos conectados para que refresquen el stock.
+      // Hay que suscribirse al canal antes de poder emitir un broadcast.
       try {
         const { createClient } = await import('@/lib/supabase/client')
-        createClient().channel('merch-sync').send({
-          type: 'broadcast', event: 'sale', payload: {},
+        const supabase = createClient()
+        const ch = supabase.channel('merch-sync')
+        ch.subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            ch.send({ type: 'broadcast', event: 'sale', payload: {} })
+              .finally(() => setTimeout(() => supabase.removeChannel(ch), 2000))
+          }
         })
       } catch { /* no crítico */ }
 
