@@ -20,8 +20,8 @@ const adminNav = [
 ]
 
 const saleModeNav = [
-  { href: '/sales/new', icon: ShoppingCart, label: 'TPV', primary: true },
-  { href: '/sales/history', icon: Clock, label: 'Ventas hoy' },
+  { href: '/sales/new', icon: ShoppingCart, label: 'TPV' },
+  { href: '/sales/history', icon: Clock, label: 'Historial' },
 ]
 
 export default function BottomNav() {
@@ -29,13 +29,38 @@ export default function BottomNav() {
   const { isSaleMode } = useAppStore()
   const nav = isSaleMode ? saleModeNav : adminNav
 
+  if (isSaleMode) {
+    return (
+      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 safe-bottom">
+        <div className="flex items-center justify-around gap-3 px-4 py-2">
+          {nav.map(({ href, icon: Icon, label }) => {
+            const active = pathname === href || pathname.startsWith(href)
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  'flex-1 flex flex-col items-center gap-1 py-2 rounded-2xl transition-all duration-150',
+                  active
+                    ? 'bg-white text-black shadow-lg shadow-white/10'
+                    : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                )}
+              >
+                <Icon size={22} strokeWidth={2.5} />
+                <span className="text-[11px] font-semibold">{label}</span>
+              </Link>
+            )
+          })}
+        </div>
+      </nav>
+    )
+  }
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 safe-bottom">
       <div className="flex items-end justify-around px-1 pt-1 pb-2">
         {nav.map(({ href, icon: Icon, label, primary }) => {
           const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
-          // En modo venta (solo 2 ítems) el botón primario no flota para quedar a la misma altura
-          const floatPrimary = primary && !isSaleMode
           return (
             <Link
               key={href}
@@ -44,8 +69,7 @@ export default function BottomNav() {
                 'flex flex-col items-center gap-0.5 min-w-[52px] py-1 px-2 rounded-xl transition-all duration-150',
                 primary
                   ? cn(
-                      'bg-white text-black rounded-2xl px-5 py-2 shadow-lg shadow-white/10',
-                      floatPrimary && '-mt-4',
+                      'bg-white text-black -mt-4 rounded-2xl px-5 py-2 shadow-lg shadow-white/10',
                       active && 'bg-zinc-100'
                     )
                   : cn(
