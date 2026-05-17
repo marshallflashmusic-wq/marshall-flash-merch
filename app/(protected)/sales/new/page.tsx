@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ShoppingCart, Plus, Minus, Trash2, Package, Check,
@@ -16,6 +16,7 @@ import { formatCurrency } from '@/lib/utils'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import PackCollage from '@/components/ui/PackCollage'
+import SwipeableTabs from '@/components/ui/SwipeableTabs'
 import type { PaymentMethod, Product, Pack } from '@/types'
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: React.ElementType; color: string }[] = [
@@ -57,19 +58,6 @@ export default function NewSalePage() {
     }
   }, [refetchAll])
 
-  // Swipe horizontal para cambiar de tab
-  const touchStartX = useRef<number | null>(null)
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX
-  }
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null) return
-    const delta = e.changedTouches[0].clientX - touchStartX.current
-    touchStartX.current = null
-    if (Math.abs(delta) < 50) return
-    if (delta < 0 && tab === 'products') setTab('packs')
-    if (delta > 0 && tab === 'packs') setTab('products')
-  }
 
   const handleConfirmSale = async () => {
     if (cart.items.length === 0) return
@@ -136,88 +124,70 @@ export default function NewSalePage() {
         )}
       </div>
 
-      {/* ── Tabs: Artículos / Packs ─── siempre visibles */}
-      <div className="flex shrink-0 bg-zinc-950 border-b border-zinc-800">
-        <button
-          onClick={() => setTab('products')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-all ${
-            tab === 'products'
-              ? 'text-white border-b-2 border-white'
-              : 'text-zinc-500 hover:text-zinc-300'
-          }`}
-        >
-          <Package size={16} />
-          Artículos
-          {tab === 'products' && products.length > 0 && (
-            <span className="bg-white/10 text-white text-xs px-1.5 py-0.5 rounded-full">{products.length}</span>
-          )}
-        </button>
-        <button
-          onClick={() => setTab('packs')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-all ${
-            tab === 'packs'
-              ? 'text-white border-b-2 border-white'
-              : 'text-zinc-500 hover:text-zinc-300'
-          }`}
-        >
-          <Package2 size={16} />
-          Packs
-          {tab === 'packs' && packs.length > 0 && (
-            <span className="bg-white/10 text-white text-xs px-1.5 py-0.5 rounded-full">{packs.length}</span>
-          )}
-        </button>
-      </div>
-
-      {/* ── Contenido de tabs ── */}
-      <div
-        className="flex-1 overflow-y-auto p-3"
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        {tab === 'products' ? (
-          loadingProducts ? <LoadingSpinner /> : products.length === 0 ? (
-            <EmptyState icon={<Package size={40} />} text="No hay productos activos" />
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {products.map(product => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  quantity={cart.items.find(i => i.type === 'product' && i.product?.id === product.id)?.quantity ?? 0}
-                  onAdd={() => cart.addProduct(product)}
-                  onDecrease={() => {
-                    const item = cart.items.find(i => i.type === 'product' && i.product?.id === product.id)
-                    if (item) cart.updateQuantity(item.id, item.quantity - 1)
-                  }}
-                />
-              ))}
-            </div>
-          )
-        ) : (
-          loadingPacks ? <LoadingSpinner /> : packs.length === 0 ? (
-            <EmptyState
-              icon={<Package2 size={40} />}
-              text="No hay packs configurados"
-              hint="Crea packs en Configuración → Packs"
-            />
-          ) : (
-            <div className="flex flex-col gap-3">
-              {packs.map(pack => (
-                <PackCard
-                  key={pack.id}
-                  pack={pack}
-                  quantity={cart.items.find(i => i.type === 'pack' && i.pack?.id === pack.id)?.quantity ?? 0}
-                  onAdd={() => cart.addPack(pack)}
-                  onDecrease={() => {
-                    const item = cart.items.find(i => i.type === 'pack' && i.pack?.id === pack.id)
-                    if (item) cart.updateQuantity(item.id, item.quantity - 1)
-                  }}
-                />
-              ))}
-            </div>
-          )
-        )}
-      </div>
+      {/* ── Tabs deslizables ── */}
+      <SwipeableTabs
+        activeKey={tab}
+        onChange={k => setTab(k as 'products' | 'packs')}
+        panelClassName="p-3"
+        tabs={[
+          {
+            key: 'products',
+            label: (
+              <span className="flex items-center justify-center gap-1.5">
+                <Package size={15} />
+                Artículos
+                {products.length > 0 && <span className="bg-white/10 text-white text-xs px-1.5 py-0.5 rounded-full">{products.length}</span>}
+              </span>
+            ),
+            content: loadingProducts ? <LoadingSpinner /> : products.length === 0 ? (
+              <EmptyState icon={<Package size={40} />} text="No hay productos activos" />
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {products.map(product => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    quantity={cart.items.find(i => i.type === 'product' && i.product?.id === product.id)?.quantity ?? 0}
+                    onAdd={() => cart.addProduct(product)}
+                    onDecrease={() => {
+                      const item = cart.items.find(i => i.type === 'product' && i.product?.id === product.id)
+                      if (item) cart.updateQuantity(item.id, item.quantity - 1)
+                    }}
+                  />
+                ))}
+              </div>
+            ),
+          },
+          {
+            key: 'packs',
+            label: (
+              <span className="flex items-center justify-center gap-1.5">
+                <Package2 size={15} />
+                Packs
+                {packs.length > 0 && <span className="bg-white/10 text-white text-xs px-1.5 py-0.5 rounded-full">{packs.length}</span>}
+              </span>
+            ),
+            content: loadingPacks ? <LoadingSpinner /> : packs.length === 0 ? (
+              <EmptyState icon={<Package2 size={40} />} text="No hay packs configurados" hint="Crea packs en Configuración → Packs" />
+            ) : (
+              <div className="flex flex-col gap-3">
+                {packs.map(pack => (
+                  <PackCard
+                    key={pack.id}
+                    pack={pack}
+                    quantity={cart.items.find(i => i.type === 'pack' && i.pack?.id === pack.id)?.quantity ?? 0}
+                    onAdd={() => cart.addPack(pack)}
+                    onDecrease={() => {
+                      const item = cart.items.find(i => i.type === 'pack' && i.pack?.id === pack.id)
+                      if (item) cart.updateQuantity(item.id, item.quantity - 1)
+                    }}
+                  />
+                ))}
+              </div>
+            ),
+          },
+        ]}
+      />
 
       {/* Barra inferior con total */}
       {cartCount > 0 && (

@@ -24,6 +24,7 @@ import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
 import PacksManager, { type PacksManagerRef } from '@/components/PacksManager'
+import SwipeableTabs from '@/components/ui/SwipeableTabs'
 import type { Product } from '@/types'
 
 type FilterStatus = 'all' | 'low_stock' | 'out_of_stock' | 'active' | 'inactive'
@@ -227,136 +228,89 @@ export default function InventoryPage() {
         }
       />
 
-      {/* ── Tabs: Artículos / Packs ── */}
-      <div className="flex shrink-0 border-b border-zinc-800 bg-zinc-950">
-        <button
-          onClick={() => setActiveTab('products')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-all ${
-            activeTab === 'products'
-              ? 'text-white border-b-2 border-white'
-              : 'text-zinc-500 hover:text-zinc-300'
-          }`}
-        >
-          <Package size={15} />
-          Artículos
-        </button>
-        <button
-          onClick={() => setActiveTab('packs')}
-          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-all ${
-            activeTab === 'packs'
-              ? 'text-white border-b-2 border-white'
-              : 'text-zinc-500 hover:text-zinc-300'
-          }`}
-        >
-          <Package2 size={15} />
-          Packs
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        {/* ── Pestaña Packs ── */}
-        {activeTab === 'packs' && (
-          <div className="px-4 py-4">
-            <PacksManager ref={packsManagerRef} products={products} />
-          </div>
-        )}
-
-        {/* ── Pestaña Artículos ── */}
-        {activeTab === 'products' && (
-        <>
-
-        {/* Alerts */}
-        {(lowStockCount > 0 || outOfStockCount > 0 || orderError) && (
-          <div className="px-4 pt-4 space-y-2">
-            {orderError && (
-              <div className="flex items-center gap-2 bg-amber-950/50 border border-amber-900 rounded-xl px-3 py-2">
-                <AlertTriangle size={16} className="text-amber-500 shrink-0" />
-                <p className="text-amber-400 text-sm">{orderError}</p>
-              </div>
-            )}
-            {outOfStockCount > 0 && (
-              <div className="flex items-center gap-2 bg-red-950/50 border border-red-900 rounded-xl px-3 py-2">
-                <X size={16} className="text-red-500 shrink-0" />
-                <p className="text-red-400 text-sm">{outOfStockCount} producto{outOfStockCount !== 1 ? 's' : ''} sin stock</p>
-              </div>
-            )}
-            {lowStockCount > 0 && (
-              <div className="flex items-center gap-2 bg-amber-950/50 border border-amber-900 rounded-xl px-3 py-2">
-                <AlertTriangle size={16} className="text-amber-500 shrink-0" />
-                <p className="text-amber-400 text-sm">{lowStockCount} producto{lowStockCount !== 1 ? 's' : ''} con stock bajo</p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Search & Filters */}
-        <div className="px-4 pt-3 pb-2 space-y-2">
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input
-              type="text"
-              placeholder="Buscar producto..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2.5 pl-9 pr-4 text-white placeholder:text-zinc-600 focus:outline-none focus:border-white text-sm"
-            />
-            {search && (
-              <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500">
-                <X size={16} />
-              </button>
-            )}
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {(['all', 'low_stock', 'out_of_stock', 'active', 'inactive'] as FilterStatus[]).map(f => (
-              <button
-                key={f}
-                onClick={() => setFilterStatus(f)}
-                className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  filterStatus === f ? 'bg-white text-black' : 'bg-zinc-800 text-zinc-400'
-                }`}
-              >
-                {f === 'all' ? 'Todos' : f === 'low_stock' ? 'Stock bajo' : f === 'out_of_stock' ? 'Sin stock' : f === 'active' ? 'Activos' : 'Inactivos'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Products Grid */}
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-zinc-600">
-            <Package size={40} />
-            <p className="mt-3 text-sm">No hay productos</p>
-          </div>
-        ) : (
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={filtered.map(p => p.id)} strategy={verticalListSortingStrategy}>
-              <div className="px-4 pb-4 space-y-2">
-                {canReorder && (
-                  <p className="text-xs text-zinc-600 text-center pb-1">Mantén pulsado y arrastra para reordenar</p>
+      <SwipeableTabs
+        activeKey={activeTab}
+        onChange={k => setActiveTab(k as Tab)}
+        tabs={[
+          {
+            key: 'products',
+            label: <span className="flex items-center justify-center gap-1.5"><Package size={15} />Artículos</span>,
+            content: (
+              <>
+                {(lowStockCount > 0 || outOfStockCount > 0 || orderError) && (
+                  <div className="px-4 pt-4 space-y-2">
+                    {orderError && (
+                      <div className="flex items-center gap-2 bg-amber-950/50 border border-amber-900 rounded-xl px-3 py-2">
+                        <AlertTriangle size={16} className="text-amber-500 shrink-0" />
+                        <p className="text-amber-400 text-sm">{orderError}</p>
+                      </div>
+                    )}
+                    {outOfStockCount > 0 && (
+                      <div className="flex items-center gap-2 bg-red-950/50 border border-red-900 rounded-xl px-3 py-2">
+                        <X size={16} className="text-red-500 shrink-0" />
+                        <p className="text-red-400 text-sm">{outOfStockCount} producto{outOfStockCount !== 1 ? 's' : ''} sin stock</p>
+                      </div>
+                    )}
+                    {lowStockCount > 0 && (
+                      <div className="flex items-center gap-2 bg-amber-950/50 border border-amber-900 rounded-xl px-3 py-2">
+                        <AlertTriangle size={16} className="text-amber-500 shrink-0" />
+                        <p className="text-amber-400 text-sm">{lowStockCount} producto{lowStockCount !== 1 ? 's' : ''} con stock bajo</p>
+                      </div>
+                    )}
+                  </div>
                 )}
-                {filtered.map(product => (
-                  <SortableProductCard
-                    key={product.id}
-                    product={product}
-                    canReorder={canReorder}
-                    onEdit={() => setEditProduct(product)}
-                    onToggleActive={() => handleToggleActive(product)}
-                    onStockDown={() => handleQuickStock(product, -1)}
-                    onStockUp={() => handleQuickStock(product, 1)}
-                  />
-                ))}
+                <div className="px-4 pt-3 pb-2 space-y-2">
+                  <div className="relative">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                    <input type="text" placeholder="Buscar producto..." value={search} onChange={e => setSearch(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2.5 pl-9 pr-4 text-white placeholder:text-zinc-600 focus:outline-none focus:border-white text-sm" />
+                    {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500"><X size={16} /></button>}
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+                    {(['all', 'low_stock', 'out_of_stock', 'active', 'inactive'] as FilterStatus[]).map(f => (
+                      <button key={f} onClick={() => setFilterStatus(f)}
+                        className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterStatus === f ? 'bg-white text-black' : 'bg-zinc-800 text-zinc-400'}`}>
+                        {f === 'all' ? 'Todos' : f === 'low_stock' ? 'Stock bajo' : f === 'out_of_stock' ? 'Sin stock' : f === 'active' ? 'Activos' : 'Inactivos'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {loading ? (
+                  <div className="flex items-center justify-center py-20">
+                    <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  </div>
+                ) : filtered.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-20 text-zinc-600">
+                    <Package size={40} /><p className="mt-3 text-sm">No hay productos</p>
+                  </div>
+                ) : (
+                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                    <SortableContext items={filtered.map(p => p.id)} strategy={verticalListSortingStrategy}>
+                      <div className="px-4 pb-4 space-y-2">
+                        {canReorder && <p className="text-xs text-zinc-600 text-center pb-1">Mantén pulsado y arrastra para reordenar</p>}
+                        {filtered.map(product => (
+                          <SortableProductCard key={product.id} product={product} canReorder={canReorder}
+                            onEdit={() => setEditProduct(product)} onToggleActive={() => handleToggleActive(product)}
+                            onStockDown={() => handleQuickStock(product, -1)} onStockUp={() => handleQuickStock(product, 1)} />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                )}
+              </>
+            ),
+          },
+          {
+            key: 'packs',
+            label: <span className="flex items-center justify-center gap-1.5"><Package2 size={15} />Packs</span>,
+            content: (
+              <div className="px-4 py-4">
+                <PacksManager ref={packsManagerRef} products={products} />
               </div>
-            </SortableContext>
-          </DndContext>
-        )}
-
-        </> /* fin pestaña Artículos */
-        )}
-      </div>
+            ),
+          },
+        ]}
+      />
 
       {/* Product Edit/Add Modal */}
       <ProductModal

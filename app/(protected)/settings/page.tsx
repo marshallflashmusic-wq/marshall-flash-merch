@@ -18,6 +18,7 @@ import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
 import PackCollage from '@/components/ui/PackCollage'
+import SwipeableTabs from '@/components/ui/SwipeableTabs'
 import type { User, Pack, PackItem, TpvSession } from '@/types'
 
 type SettingsTab = 'general' | 'users' | 'sessions'
@@ -36,29 +37,34 @@ export default function SettingsPage() {
     router.push('/login')
   }
 
+  const settingsTabs = [
+    {
+      key: 'general',
+      label: 'General',
+      content: <div className="px-4 py-4"><GeneralTab user={user} onLogout={handleLogout} isAdmin={isAdmin} /></div>,
+    },
+    ...(isAdmin ? [
+      {
+        key: 'users',
+        label: 'Usuarios',
+        content: <div className="px-4 py-4"><UsersTab /></div>,
+      },
+      {
+        key: 'sessions',
+        label: 'TPV',
+        content: <div className="px-4 py-4"><TpvSessionsTab adminId={user?.id ?? null} /></div>,
+      },
+    ] : []),
+  ]
+
   return (
     <div className="h-full flex flex-col">
       <TopBar title="Configuración" />
-
-      <div className="flex border-b border-zinc-800 shrink-0">
-        {(['general', ...(isAdmin ? ['users', 'sessions'] : [])] as SettingsTab[]).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 py-3 text-xs font-semibold whitespace-nowrap transition-colors ${
-              tab === t ? 'text-white border-b-2 border-white' : 'text-zinc-500'
-            }`}
-          >
-            {t === 'general' ? 'General' : t === 'users' ? 'Usuarios' : 'TPV'}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        {tab === 'general' && <GeneralTab user={user} onLogout={handleLogout} isAdmin={isAdmin} />}
-        {tab === 'users' && isAdmin && <UsersTab />}
-{tab === 'sessions' && isAdmin && <TpvSessionsTab adminId={user?.id ?? null} />}
-      </div>
+      <SwipeableTabs
+        activeKey={tab}
+        onChange={k => setTab(k as SettingsTab)}
+        tabs={settingsTabs}
+      />
     </div>
   )
 }
