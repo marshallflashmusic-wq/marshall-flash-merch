@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
       const msg = rpcError.message ?? ''
       if (msg.includes('STOCK_INSUFICIENTE')) {
         return NextResponse.json(
-          { error: 'Stock insuficiente. Otro vendedor puede haber vendido el mismo artículo. Actualiza y vuelve a intentarlo.' },
+          { error: 'Stock agotado. Otro vendedor puede haber vendido el mismo artículo.' },
           { status: 409 }
         )
       }
