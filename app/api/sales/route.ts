@@ -91,6 +91,7 @@ export async function POST(request: NextRequest) {
         p_quantity: dec.quantity,
         p_sale_id: sale.id,
         p_user_id: saleData.user_id,
+        p_movement_type: (dec as { movement_type?: string }).movement_type ?? 'sale',
       })
     }
 
@@ -165,16 +166,21 @@ export async function DELETE(request: NextRequest) {
     }
 
     for (const [productId, qty] of Object.entries(stockIncrements)) {
-      const { error: stockError } = await supabase.rpc('increment_stock', {
+      const { error: rpcError } = await supabase.rpc('increment_stock', {
         p_product_id: productId,
         p_quantity: qty,
         p_sale_id: id,
       })
-      if (stockError) {
-        return NextResponse.json(
-          { error: `Error restaurando stock del producto ${productId}: ${stockError.message}` },
-          { status: 500 }
-        )
+      if (rpcError) {
+        // Fallback: actualización directa si la función RPC no existe
+        const { data: prod } = await supabase
+          .from('products').select('stock').eq('id', productId).single()
+        if (prod) {
+          await supabase.from('products').update({
+            stock: prod.stock + qty,
+            updated_at: new Date().toISOString(),
+          }).eq('id', productId)
+        }
       }
     }
   }

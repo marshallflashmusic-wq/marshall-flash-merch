@@ -44,6 +44,7 @@ export interface Pack {
   image_url?: string
   active: boolean
   items?: PackItem[]
+  available_stock?: number
   created_at: string
   updated_at: string
 }
@@ -54,6 +55,7 @@ export interface PackItem {
   product_id: string
   product?: Product
   quantity: number
+  individual_pack_price?: number | null
 }
 
 export interface Event {
@@ -81,8 +83,20 @@ export interface Sale {
   profit: number
   notes?: string | null
   synced: boolean
+  seller_name?: string | null
+  seller_type?: 'admin' | 'tpv' | null
   created_at: string
   items?: SaleItem[]
+}
+
+export interface TpvSession {
+  id: string
+  pin_code: string
+  seller_name: string | null
+  created_at: string
+  expires_at: string
+  active: boolean
+  created_by: string | null
 }
 
 export interface SaleItem {
@@ -147,7 +161,7 @@ export interface OfflineSale {
   id: string
   data: Omit<Sale, 'id' | 'created_at'>
   items: Omit<SaleItem, 'id' | 'sale_id'>[]
-  stockDecrements: { product_id: string; quantity: number }[]
+  stockDecrements: { product_id: string; quantity: number; movement_type?: string }[]
   created_at: string
   pending_sync: boolean
 }

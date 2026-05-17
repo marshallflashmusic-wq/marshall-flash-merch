@@ -1,8 +1,8 @@
 'use client'
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Plus, Search, Minus, Edit2, AlertTriangle, Package,
-  X, Filter, ChevronDown, Check, Trash2, GripVertical
+  X, Filter, ChevronDown, Check, Trash2, GripVertical, Package2,
 } from 'lucide-react'
 import {
   DndContext, closestCenter, PointerSensor, TouchSensor,
@@ -23,13 +23,17 @@ import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
+import PacksManager, { type PacksManagerRef } from '@/components/PacksManager'
 import type { Product } from '@/types'
 
 type FilterStatus = 'all' | 'low_stock' | 'out_of_stock' | 'active' | 'inactive'
+type Tab = 'products' | 'packs'
 
 export default function InventoryPage() {
   const { user } = useAppStore()
   const { products, loading, refetch } = useAllProducts()
+  const [activeTab, setActiveTab] = useState<Tab>('products')
+  const packsManagerRef = useRef<PacksManagerRef>(null)
   const [orderedProducts, setOrderedProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
   const [search, setSearch] = useState('')
@@ -205,10 +209,17 @@ export default function InventoryPage() {
     <div className="h-full flex flex-col">
       <TopBar
         title="Inventario"
-        subtitle={`${orderedProducts.length} productos`}
+        subtitle={activeTab === 'products' ? `${orderedProducts.length} artículos` : 'Packs'}
         actions={
           <button
-            onClick={() => { setEditProduct(null); setShowAddModal(true) }}
+            onClick={() => {
+              if (activeTab === 'products') {
+                setEditProduct(null)
+                setShowAddModal(true)
+              } else {
+                packsManagerRef.current?.openNew()
+              }
+            }}
             className="p-2 rounded-xl bg-white text-black"
           >
             <Plus size={18} strokeWidth={2.5} />
@@ -216,7 +227,44 @@ export default function InventoryPage() {
         }
       />
 
+      {/* ── Tabs: Artículos / Packs ── */}
+      <div className="flex shrink-0 border-b border-zinc-800 bg-zinc-950">
+        <button
+          onClick={() => setActiveTab('products')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-all ${
+            activeTab === 'products'
+              ? 'text-white border-b-2 border-white'
+              : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          <Package size={15} />
+          Artículos
+        </button>
+        <button
+          onClick={() => setActiveTab('packs')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-all ${
+            activeTab === 'packs'
+              ? 'text-white border-b-2 border-white'
+              : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          <Package2 size={15} />
+          Packs
+        </button>
+      </div>
+
       <div className="flex-1 overflow-y-auto">
+        {/* ── Pestaña Packs ── */}
+        {activeTab === 'packs' && (
+          <div className="px-4 py-4">
+            <PacksManager ref={packsManagerRef} products={products} />
+          </div>
+        )}
+
+        {/* ── Pestaña Artículos ── */}
+        {activeTab === 'products' && (
+        <>
+
         {/* Alerts */}
         {(lowStockCount > 0 || outOfStockCount > 0 || orderError) && (
           <div className="px-4 pt-4 space-y-2">
@@ -304,6 +352,9 @@ export default function InventoryPage() {
               </div>
             </SortableContext>
           </DndContext>
+        )}
+
+        </> /* fin pestaña Artículos */
         )}
       </div>
 

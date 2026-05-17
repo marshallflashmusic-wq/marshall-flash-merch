@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { Clock, Filter, Banknote, Smartphone, CreditCard, Wallet, Download, X, Trash2, MessageSquare, Pencil } from 'lucide-react'
+import { Clock, Filter, Banknote, Smartphone, CreditCard, Wallet, Download, X, Trash2, MessageSquare, Pencil, Package2 } from 'lucide-react'
 import { useSalesHistory } from '@/hooks/useSales'
 import { useEvents } from '@/hooks/useEvents'
 import { useAppStore } from '@/store/appStore'
@@ -43,6 +43,7 @@ export default function SalesHistoryPage() {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [editingSale, setEditingSale] = useState<Sale | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState<{ sale: Sale; restoreStock: boolean } | null>(null)
   const [savingEdit, setSavingEdit] = useState(false)
   const [editAmount, setEditAmount] = useState('')
@@ -54,17 +55,28 @@ export default function SalesHistoryPage() {
 
   const handleDelete = (sale: Sale) => {
     setSelectedSale(null)
-    setDeleteConfirm({ sale, restoreStock: false })
+    setDeleteConfirm({ sale, restoreStock: true })
   }
 
   const confirmDelete = async () => {
     if (!deleteConfirm) return
     const { sale, restoreStock } = deleteConfirm
     setDeleteConfirm(null)
+    setDeleteError('')
     setDeletingId(sale.id)
-    await fetch(`/api/sales?id=${sale.id}&restoreStock=${restoreStock}`, { method: 'DELETE' })
-    setDeletingId(null)
-    refetch()
+    try {
+      const res = await fetch(`/api/sales?id=${sale.id}&restoreStock=${restoreStock}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        setDeleteError((err as { error?: string }).error ?? `Error ${res.status} al eliminar la venta`)
+      } else {
+        refetch()
+      }
+    } catch {
+      setDeleteError('Error de conexión al eliminar la venta')
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   const openEdit = (sale: Sale) => {
@@ -224,7 +236,18 @@ export default function SalesHistoryPage() {
                       {!sale.synced && <Badge variant="warning">Pendiente sync</Badge>}
                       {sale.notes && <MessageSquare size={12} className="text-zinc-400 shrink-0" />}
                     </div>
-                    <p className="text-zinc-500 text-xs mt-0.5">{formatDateTime(sale.created_at)}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <p className="text-zinc-500 text-xs">{formatDateTime(sale.created_at)}</p>
+                      {(sale.seller_name ?? sale.user?.name) && (
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                          sale.seller_type === 'tpv'
+                            ? 'bg-blue-950/60 text-blue-400'
+                            : 'bg-zinc-800 text-zinc-400'
+                        }`}>
+                          {sale.seller_name ?? sale.user?.name}
+                        </span>
+                      )}
+                    </div>
                     {sale.items && (
                       <p className="text-zinc-600 text-xs truncate">
                         {sale.items.map(i => `${i.quantity}× ${i.product?.name ?? i.pack?.name ?? '?'}`).join(', ')}
@@ -292,10 +315,19 @@ export default function SalesHistoryPage() {
                   <span className="text-white">{selectedSale.event.name}</span>
                 </div>
               )}
-              {selectedSale.user && (
+              {(selectedSale.seller_name ?? selectedSale.user?.name) && (
                 <div className="flex justify-between py-1">
                   <span className="text-zinc-500">Vendedor</span>
-                  <span className="text-white">{selectedSale.user.name}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="text-white">{selectedSale.seller_name ?? selectedSale.user?.name}</span>
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                      selectedSale.seller_type === 'tpv'
+                        ? 'bg-blue-950/60 text-blue-400'
+                        : 'bg-zinc-800 text-zinc-400'
+                    }`}>
+                      {selectedSale.seller_type === 'tpv' ? 'TPV' : 'Admin'}
+                    </span>
+                  </span>
                 </div>
               )}
             </div>
@@ -307,13 +339,33 @@ export default function SalesHistoryPage() {
             )}
             {selectedSale.items && selectedSale.items.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Productos</p>
-                <div className="space-y-1">
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Artículos vendidos</p>
+                <div className="space-y-1.5">
                   {selectedSale.items.map(item => (
-                    <div key={item.id} className="flex items-center gap-2 py-1.5 border-b border-zinc-800 last:border-0">
-                      <span className="text-zinc-500 text-sm">{item.quantity}×</span>
-                      <span className="text-white text-sm flex-1">{item.product?.name ?? item.pack?.name ?? '?'}</span>
-                      <span className="text-white text-sm font-medium">{formatCurrency(item.subtotal)}</span>
+                    <div key={item.id}>
+                      <div className="flex items-center gap-2 py-1.5">
+                        <span className="text-zinc-500 text-sm w-5 shrink-0">{item.quantity}×</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            {item.pack_id && (
+                              <Package2 size={11} className="text-zinc-500 shrink-0" />
+                            )}
+                            <span className="text-white text-sm truncate">
+                              {item.product?.name ?? item.pack?.name ?? '?'}
+                            </span>
+                          </div>
+                          {item.pack_id && item.pack && (
+                            <p className="text-zinc-600 text-xs mt-0.5 truncate">Pack incluido</p>
+                          )}
+                        </div>
+                        <span className="text-white text-sm font-medium shrink-0">{formatCurrency(item.subtotal)}</span>
+                      </div>
+                      {item.pack_id && (
+                        <div className="ml-7 border-b border-zinc-800 pb-1.5" />
+                      )}
+                      {!item.pack_id && (
+                        <div className="border-b border-zinc-800 last:border-0" />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -447,6 +499,14 @@ export default function SalesHistoryPage() {
           </div>
         )}
       </Modal>
+
+      {/* Error de eliminación */}
+      {deleteError && (
+        <div className="fixed bottom-24 left-4 right-4 z-50 bg-red-950 border border-red-800 rounded-2xl px-4 py-3 flex items-center justify-between gap-3">
+          <p className="text-red-400 text-sm">{deleteError}</p>
+          <button onClick={() => setDeleteError('')} className="text-red-500 shrink-0"><X size={16} /></button>
+        </div>
+      )}
 
       {/* Modal filtros */}
       <Modal open={showFilters} onClose={() => setShowFilters(false)} title="Filtros" size="md">

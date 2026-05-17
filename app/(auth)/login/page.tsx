@@ -3,44 +3,71 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useAppStore } from '@/store/appStore'
-import { Zap, Lock, Mail, Eye, EyeOff, Music2, ChevronDown } from 'lucide-react'
+import { Zap, Lock, Mail, Eye, EyeOff, Music2, ChevronDown, Hash, User } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 
 export default function LoginPage() {
   const router = useRouter()
-  const { setSaleMode } = useAppStore()
+  const { setSaleMode, setTpvSession } = useAppStore()
+
+  const [showTpvForm, setShowTpvForm] = useState(false)
+  const [pin, setPin] = useState('')
+  const [sellerName, setSellerName] = useState('')
+  const [tpvLoading, setTpvLoading] = useState(false)
+  const [tpvError, setTpvError] = useState('')
+
   const [showAdminForm, setShowAdminForm] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [adminLoading, setAdminLoading] = useState(false)
+  const [adminError, setAdminError] = useState('')
 
-  // Modo Venta: acceso directo al TPV sin ningún login
-  const handleSaleMode = () => {
-    setSaleMode(true)
-    router.push('/sales/new')
+  const handleTpvLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setTpvError('')
+    setTpvLoading(true)
+    try {
+      const res = await fetch('/api/tpv-sessions/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin, sellerName }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setTpvError(data.error ?? 'PIN no válido')
+        return
+      }
+      setTpvSession(data.session)
+      setSaleMode(true)
+      router.push('/sales/new')
+    } catch {
+      setTpvError('Error de conexión. Comprueba el wifi.')
+    } finally {
+      setTpvLoading(false)
+    }
   }
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
-    setLoading(true)
+    setAdminError('')
+    setAdminLoading(true)
     try {
       const supabase = createClient()
       const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
       if (authError) {
-        setError('Email o contraseña incorrectos')
+        setAdminError('Email o contraseña incorrectos')
       } else {
+        setTpvSession(null)
         setSaleMode(false)
         router.push('/dashboard')
         router.refresh()
       }
     } catch {
-      setError('Error de conexión.')
+      setAdminError('Error de conexión.')
     } finally {
-      setLoading(false)
+      setAdminLoading(false)
     }
   }
 
@@ -57,17 +84,59 @@ export default function LoginPage() {
           <p className="text-zinc-600 text-xs mt-0.5">Merch POS</p>
         </div>
 
-        {/* MODO VENTA — botón principal, sin login */}
-        <button
-          onClick={handleSaleMode}
-          className="w-full bg-white hover:bg-zinc-100 active:bg-zinc-200 rounded-3xl p-7 flex flex-col items-center gap-3 transition-all duration-100 tap-scale shadow-2xl shadow-white/10"
-        >
-          <Zap size={44} className="text-black" strokeWidth={2.5} fill="currentColor" />
-          <div className="text-center">
-            <p className="text-black text-2xl font-black tracking-tight leading-none">MODO VENTA</p>
-            <p className="text-black/60 text-sm font-medium mt-1">Acceso directo al TPV</p>
-          </div>
-        </button>
+        {/* MODO VENTA — con PIN */}
+        <div className="flex flex-col gap-3">
+          <button
+            onClick={() => { setShowTpvForm(v => !v); setTpvError('') }}
+            className="w-full bg-white hover:bg-zinc-100 active:bg-zinc-200 rounded-3xl p-7 flex flex-col items-center gap-3 transition-all duration-100 tap-scale shadow-2xl shadow-white/10"
+          >
+            <Zap size={44} className="text-black" strokeWidth={2.5} fill="currentColor" />
+            <div className="text-center">
+              <p className="text-black text-2xl font-black tracking-tight leading-none">MODO VENTA</p>
+              <p className="text-black/60 text-sm font-medium mt-1">Acceso con PIN de vendedor</p>
+            </div>
+          </button>
+
+          {showTpvForm && (
+            <form
+              onSubmit={handleTpvLogin}
+              className="flex flex-col gap-3 bg-zinc-900 border border-zinc-800 rounded-2xl p-4 fade-in"
+            >
+              <Input
+                label="PIN de acceso"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={4}
+                placeholder="0000"
+                value={pin}
+                onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
+                icon={<Hash size={16} />}
+                required
+                autoComplete="off"
+              />
+              <Input
+                label="Tu nombre"
+                type="text"
+                placeholder="Ej: Pablo"
+                value={sellerName}
+                onChange={e => setSellerName(e.target.value)}
+                icon={<User size={16} />}
+                required
+                autoComplete="off"
+              />
+              {tpvError && (
+                <p className="text-red-400 text-xs text-center bg-red-950/50 border border-red-900 rounded-xl py-2">
+                  {tpvError}
+                </p>
+              )}
+              <Button type="submit" fullWidth loading={tpvLoading}>
+                <Zap size={16} />
+                Entrar al TPV
+              </Button>
+            </form>
+          )}
+        </div>
 
         {/* Acceso Admin — colapsable */}
         <div className="flex flex-col gap-3">
@@ -112,10 +181,10 @@ export default function LoginPage() {
                 required
                 autoComplete="current-password"
               />
-              {error && (
-                <p className="text-red-400 text-xs text-center bg-red-950/50 border border-red-900 rounded-xl py-2">{error}</p>
+              {adminError && (
+                <p className="text-red-400 text-xs text-center bg-red-950/50 border border-red-900 rounded-xl py-2">{adminError}</p>
               )}
-              <Button type="submit" fullWidth loading={loading} variant="secondary">
+              <Button type="submit" fullWidth loading={adminLoading} variant="secondary">
                 Entrar como admin
               </Button>
             </form>

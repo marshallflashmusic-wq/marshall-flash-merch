@@ -2,14 +2,14 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Users, Download, Shield, LogOut, ChevronRight,
-  Plus, Edit2, Trash2, Eye, EyeOff, Package2,
-  X, Check
+  Users, Download, LogOut, ChevronRight,
+  Plus, Edit2, Trash2, Eye, EyeOff, Package2, Package,
+  X, Check, AlertCircle, Terminal, Copy, Clock,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useAppStore } from '@/store/appStore'
 import { useAllProducts } from '@/hooks/useProducts'
-import { usePacks } from '@/hooks/usePacks'
+import { calcAvailableStock } from '@/hooks/usePacks'
 import { formatCurrency } from '@/lib/utils'
 import TopBar from '@/components/layout/TopBar'
 import Card from '@/components/ui/Card'
@@ -17,16 +17,18 @@ import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
-import type { User, Pack, Product } from '@/types'
+import PackCollage from '@/components/ui/PackCollage'
+import type { User, Pack, PackItem, TpvSession } from '@/types'
 
-type SettingsTab = 'general' | 'users' | 'packs'
+type SettingsTab = 'general' | 'users' | 'sessions'
 
 export default function SettingsPage() {
   const router = useRouter()
-  const { user } = useAppStore()
+  const { user, isSaleMode } = useAppStore()
   const [tab, setTab] = useState<SettingsTab>('general')
 
-  const isAdmin = user?.role === 'admin'
+  // Si no estás en modo venta, eres admin (el nav de TPV no tiene acceso a Settings)
+  const isAdmin = !isSaleMode
 
   const handleLogout = async () => {
     const supabase = createClient()
@@ -38,30 +40,30 @@ export default function SettingsPage() {
     <div className="h-full flex flex-col">
       <TopBar title="Configuración" />
 
-      <div className="flex border-b border-zinc-800 shrink-0 overflow-x-auto">
-        {(['general', ...(isAdmin ? ['users', 'packs'] : [])] as SettingsTab[]).map(t => (
+      <div className="flex border-b border-zinc-800 shrink-0">
+        {(['general', ...(isAdmin ? ['users', 'sessions'] : [])] as SettingsTab[]).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors ${
+            className={`flex-1 py-3 text-xs font-semibold whitespace-nowrap transition-colors ${
               tab === t ? 'text-white border-b-2 border-white' : 'text-zinc-500'
             }`}
           >
-            {t === 'general' ? 'General' : t === 'users' ? 'Usuarios' : 'Packs'}
+            {t === 'general' ? 'General' : t === 'users' ? 'Usuarios' : 'TPV'}
           </button>
         ))}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        {tab === 'general' && <GeneralTab user={user} onLogout={handleLogout} />}
+        {tab === 'general' && <GeneralTab user={user} onLogout={handleLogout} isAdmin={isAdmin} />}
         {tab === 'users' && isAdmin && <UsersTab />}
-        {tab === 'packs' && isAdmin && <PacksTab />}
+{tab === 'sessions' && isAdmin && <TpvSessionsTab adminId={user?.id ?? null} />}
       </div>
     </div>
   )
 }
 
-function GeneralTab({ user, onLogout }: { user: User | null; onLogout: () => void }) {
+function GeneralTab({ user, onLogout, isAdmin }: { user: User | null; onLogout: () => void; isAdmin: boolean }) {
   const { products } = useAllProducts()
 
   const exportInventory = () => {
@@ -101,8 +103,8 @@ function GeneralTab({ user, onLogout }: { user: User | null; onLogout: () => voi
           <div>
             <p className="text-white font-bold">{user?.name ?? 'Usuario'}</p>
             <p className="text-zinc-500 text-sm">{user?.email}</p>
-            <Badge variant={user?.role === 'admin' ? 'warning' : 'info'} className="mt-1">
-              {user?.role === 'admin' ? 'Admin' : 'Staff'}
+            <Badge variant={isAdmin ? 'warning' : 'info'} className="mt-1">
+              {isAdmin ? 'Admin' : 'Vendedor TPV'}
             </Badge>
           </div>
         </div>
@@ -275,61 +277,337 @@ function UsersTab() {
   )
 }
 
+// ─── Sesiones TPV ──────────────────────────────────────────────────────────
+
+function formatTimeLeft(expiresAt: string): string {
+  const diff = new Date(expiresAt).getTime() - Date.now()
+  if (diff <= 0) return 'EXPIRADO'
+  const h = Math.floor(diff / 3600000)
+  const m = Math.floor((diff % 3600000) / 60000)
+  return h > 0 ? `${h}h ${m}min` : `${m}min`
+}
+
+function TpvSessionsTab({ adminId }: { adminId: string | null }) {
+  const [sessions, setSessions] = useState<TpvSession[]>([])
+  const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [hours, setHours] = useState(6)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [, forceUpdate] = useState(0)
+
+  const loadSessions = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/tpv-sessions')
+      if (res.ok) {
+        const { sessions: data } = await res.json()
+        setSessions(data ?? [])
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { loadSessions() }, [])
+
+  // Refrescar el contador de tiempo cada minuto
+  useEffect(() => {
+    const interval = setInterval(() => forceUpdate(n => n + 1), 60000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const handleCreate = async () => {
+    setCreating(true)
+    try {
+      const res = await fetch('/api/tpv-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hours, created_by: adminId }),
+      })
+      if (res.ok) loadSessions()
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleInvalidate = async (id: string) => {
+    await fetch(`/api/tpv-sessions?id=${id}`, { method: 'DELETE' })
+    loadSessions()
+  }
+
+  const copyPin = (pin: string, id: string) => {
+    navigator.clipboard.writeText(pin).catch(() => {})
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
+  }
+
+  const active = sessions.filter(s => new Date(s.expires_at) > new Date())
+  const expired = sessions.filter(s => new Date(s.expires_at) <= new Date())
+
+  return (
+    <div className="space-y-4">
+      {/* Generar PIN */}
+      <Card padding="md">
+        <p className="text-white font-semibold text-sm mb-3">Generar nuevo PIN</p>
+        <div className="flex gap-2 mb-3">
+          {[2, 4, 6, 12, 24].map(h => (
+            <button
+              key={h}
+              onClick={() => setHours(h)}
+              className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+                hours === h
+                  ? 'border-white bg-white/10 text-white'
+                  : 'border-zinc-700 text-zinc-500'
+              }`}
+            >
+              {h}h
+            </button>
+          ))}
+        </div>
+        <Button fullWidth onClick={handleCreate} loading={creating}>
+          <Terminal size={16} />
+          Generar PIN ({hours}h)
+        </Button>
+      </Card>
+
+      {/* Lista de sesiones activas */}
+      {loading ? (
+        <div className="flex justify-center py-10">
+          <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : active.length === 0 && expired.length === 0 ? (
+        <div className="flex flex-col items-center py-10 text-zinc-600">
+          <Terminal size={36} />
+          <p className="mt-2 text-sm">No hay sesiones activas</p>
+          <p className="text-xs mt-1 text-zinc-700">Genera un PIN para que los vendedores puedan entrar</p>
+        </div>
+      ) : (
+        <>
+          {active.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                Activas ({active.length})
+              </p>
+              <div className="space-y-2">
+                {active.map(session => (
+                  <Card key={session.id} padding="none">
+                    <div className="flex items-center gap-3 p-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-white font-black text-xl tracking-[0.2em]">
+                            {session.pin_code}
+                          </span>
+                          <button
+                            onClick={() => copyPin(session.pin_code, session.id)}
+                            className="p-1 text-zinc-500 hover:text-white transition-colors"
+                            title="Copiar PIN"
+                          >
+                            {copiedId === session.id
+                              ? <Check size={13} className="text-green-400" />
+                              : <Copy size={13} />
+                            }
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Clock size={11} className="text-zinc-600" />
+                          <span className="text-zinc-500 text-xs">{formatTimeLeft(session.expires_at)}</span>
+                          {session.seller_name && (
+                            <span className="text-blue-400 text-xs font-medium">· {session.seller_name}</span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleInvalidate(session.id)}
+                        className="p-2 rounded-xl bg-red-950/50 text-red-500 hover:bg-red-900/50 transition-colors"
+                        title="Invalidar"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {expired.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-zinc-600 uppercase tracking-wider mb-2">
+                Expiradas ({expired.length})
+              </p>
+              <div className="space-y-2 opacity-50">
+                {expired.map(session => (
+                  <Card key={session.id} padding="none">
+                    <div className="flex items-center gap-3 p-3">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-zinc-500 font-black text-lg tracking-[0.2em] line-through">
+                          {session.pin_code}
+                        </span>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {session.seller_name && (
+                            <span className="text-zinc-600 text-xs">· {session.seller_name}</span>
+                          )}
+                          <span className="text-zinc-700 text-xs">EXPIRADO</span>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+interface PackItemForm {
+  product_id: string
+  quantity: number
+  individual_pack_price: string
+}
+
 function PacksTab() {
-  const { packs, loading, refetch } = usePacks()
   const { products } = useAllProducts()
+  const [packs, setPacks] = useState<Pack[]>([])
+  const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editPack, setEditPack] = useState<Pack | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<Pack | null>(null)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [apiError, setApiError] = useState('')
   const [form, setForm] = useState({ name: '', description: '', sale_price: '' })
-  const [packItems, setPackItems] = useState<{ product_id: string; quantity: number }[]>([])
+  const [packItems, setPackItems] = useState<PackItemForm[]>([])
+
+  const loadPacks = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/packs')
+      if (res.ok) {
+        const { packs: data } = await res.json()
+        setPacks((data ?? []).map((p: Pack) => ({
+          ...p,
+          available_stock: calcAvailableStock(p.items ?? []),
+        })))
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { loadPacks() }, [])
+
+  // Computed values for modal preview
+  const packSalePrice = parseFloat(form.sale_price) || 0
+  const normalTotal = packItems.reduce((acc, item) => {
+    const p = products.find(x => x.id === item.product_id)
+    return acc + (p?.sale_price ?? 0) * item.quantity
+  }, 0)
+  const savings = normalTotal > 0 ? normalTotal - packSalePrice : 0
+
+  const modalStock = packItems.length > 0
+    ? Math.min(...packItems.map(item => {
+        const p = products.find(x => x.id === item.product_id)
+        return Math.floor((p?.stock ?? 0) / item.quantity)
+      }))
+    : 0
+
+  const previewItems: PackItem[] = packItems.map(item => ({
+    id: '',
+    pack_id: '',
+    product_id: item.product_id,
+    quantity: item.quantity,
+    individual_pack_price: item.individual_pack_price ? parseFloat(item.individual_pack_price) : null,
+    product: products.find(p => p.id === item.product_id),
+  }))
 
   const openNew = () => {
     setEditPack(null)
     setForm({ name: '', description: '', sale_price: '' })
     setPackItems([])
+    setApiError('')
     setShowModal(true)
   }
 
   const openEdit = (pack: Pack) => {
     setEditPack(pack)
-    setForm({ name: pack.name, description: pack.description ?? '', sale_price: String(pack.sale_price) })
-    setPackItems(pack.items?.map(i => ({ product_id: i.product_id, quantity: i.quantity })) ?? [])
+    setForm({
+      name: pack.name,
+      description: pack.description ?? '',
+      sale_price: String(pack.sale_price),
+    })
+    setPackItems(pack.items?.map(i => ({
+      product_id: i.product_id,
+      quantity: i.quantity,
+      individual_pack_price: i.individual_pack_price != null ? String(i.individual_pack_price) : '',
+    })) ?? [])
+    setApiError('')
     setShowModal(true)
   }
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!form.name.trim() || !form.sale_price || packItems.length === 0) return
     setSaving(true)
-    const supabase = createClient()
-    if (editPack) {
-      await supabase.from('packs').update({ name: form.name, description: form.description, sale_price: parseFloat(form.sale_price), updated_at: new Date().toISOString() }).eq('id', editPack.id)
-      await supabase.from('pack_items').delete().eq('pack_id', editPack.id)
-      await supabase.from('pack_items').insert(packItems.map(i => ({ ...i, pack_id: editPack.id })))
-    } else {
-      const { data: newPack } = await supabase.from('packs').insert({ name: form.name, description: form.description, sale_price: parseFloat(form.sale_price), active: true }).select().single()
-      if (newPack) {
-        await supabase.from('pack_items').insert(packItems.map(i => ({ ...i, pack_id: newPack.id })))
+    setApiError('')
+
+    const items = packItems.map(i => ({
+      product_id: i.product_id,
+      quantity: i.quantity,
+      individual_pack_price: i.individual_pack_price ? parseFloat(i.individual_pack_price) : null,
+    }))
+
+    try {
+      const method = editPack ? 'PATCH' : 'POST'
+      const body = editPack
+        ? { id: editPack.id, name: form.name.trim(), description: form.description, sale_price: parseFloat(form.sale_price), items }
+        : { name: form.name.trim(), description: form.description, sale_price: parseFloat(form.sale_price), items }
+
+      const res = await fetch('/api/packs', {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setApiError((data as { error?: string }).error ?? 'Error al guardar el pack')
+        return
       }
+
+      setShowModal(false)
+      loadPacks()
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
-    setShowModal(false)
-    refetch()
   }
 
   const handleToggle = async (pack: Pack) => {
-    const supabase = createClient()
-    await supabase.from('packs').update({ active: !pack.active, updated_at: new Date().toISOString() }).eq('id', pack.id)
-    refetch()
+    await fetch('/api/packs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: pack.id, active: !pack.active }),
+    })
+    loadPacks()
+  }
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return
+    setDeleting(true)
+    await fetch(`/api/packs?id=${confirmDelete.id}`, { method: 'DELETE' })
+    setDeleting(false)
+    setConfirmDelete(null)
+    loadPacks()
   }
 
   const addPackItem = () => {
-    if (products.length > 0) {
-      setPackItems(prev => [...prev, { product_id: products[0].id, quantity: 1 }])
-    }
+    if (products.length === 0) return
+    setPackItems(prev => [...prev, { product_id: products[0].id, quantity: 1, individual_pack_price: '' }])
   }
 
-  const updatePackItem = (idx: number, field: 'product_id' | 'quantity', value: string | number) => {
+  const updatePackItem = (idx: number, field: keyof PackItemForm, value: string | number) => {
     setPackItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item))
   }
 
@@ -341,7 +619,7 @@ function PacksTab() {
     <div className="space-y-3">
       <Button onClick={openNew} fullWidth variant="outline">
         <Plus size={16} />
-        Crear pack
+        Nuevo pack
       </Button>
 
       {loading ? (
@@ -350,83 +628,271 @@ function PacksTab() {
         </div>
       ) : packs.length === 0 ? (
         <div className="flex flex-col items-center py-10 text-zinc-600">
-          <Package2 size={32} />
-          <p className="mt-2 text-sm">No hay packs creados</p>
+          <Package2 size={36} />
+          <p className="mt-2 text-sm">No hay packs configurados</p>
+          <p className="text-xs mt-1 text-zinc-700">Crea tu primer pack con el botón de arriba</p>
         </div>
       ) : (
-        packs.map(pack => (
-          <Card key={pack.id} padding="md" className={!pack.active ? 'opacity-50' : ''}>
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center">
-                <Package2 size={18} className="text-white" />
+        packs.map(pack => {
+          const avail = pack.available_stock ?? 0
+          const nTotal = pack.items?.reduce((a, i) => a + (i.product?.sale_price ?? 0) * i.quantity, 0) ?? 0
+          const sav = nTotal - pack.sale_price
+
+          return (
+            <Card key={pack.id} padding="none" className={!pack.active ? 'opacity-60' : ''}>
+              <div className="flex gap-3 p-3">
+                {/* Collage */}
+                <div className="relative w-16 h-16 rounded-xl overflow-hidden shrink-0 bg-zinc-800">
+                  <PackCollage items={pack.items ?? []} />
+                </div>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-white font-bold text-sm leading-tight">{pack.name}</p>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => openEdit(pack)}
+                        className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                        title="Editar"
+                      >
+                        <Edit2 size={12} />
+                      </button>
+                      <button
+                        onClick={() => handleToggle(pack)}
+                        className={`p-1.5 rounded-lg transition-colors ${pack.active ? 'bg-green-900/50 text-green-400' : 'bg-zinc-800 text-zinc-500'}`}
+                        title={pack.active ? 'Desactivar' : 'Activar'}
+                      >
+                        {pack.active ? <Check size={12} /> : <X size={12} />}
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(pack)}
+                        className="p-1.5 rounded-lg bg-red-950/60 text-red-500 hover:bg-red-900/60 transition-colors"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <p className="text-white font-black text-sm">{formatCurrency(pack.sale_price)}</p>
+                    {sav > 0.01 && (
+                      <span className="text-green-400 text-xs">ahorra {formatCurrency(sav)}</span>
+                    )}
+                  </div>
+
+                  {pack.items && pack.items.length > 0 && (
+                    <p className="text-zinc-500 text-xs mt-0.5 line-clamp-1">
+                      {pack.items.map(i => `${i.quantity > 1 ? `${i.quantity}× ` : ''}${i.product?.name ?? '?'}`).join(' · ')}
+                    </p>
+                  )}
+
+                  <div className="mt-1">
+                    {avail === 0 ? (
+                      <span className="text-red-400 text-xs font-bold">AGOTADO</span>
+                    ) : (
+                      <span className="text-zinc-600 text-xs">{avail} disponible{avail !== 1 ? 's' : ''}</span>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-white font-bold text-sm">{pack.name}</p>
-                <p className="text-white font-bold">{formatCurrency(pack.sale_price)}</p>
-                {pack.items && (
-                  <p className="text-zinc-500 text-xs mt-1">
-                    {pack.items.map(i => `${i.quantity}× ${i.product?.name}`).join(', ')}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => openEdit(pack)} className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400">
-                  <Edit2 size={14} />
-                </button>
-                <button
-                  onClick={() => handleToggle(pack)}
-                  className={`p-1.5 rounded-lg ${pack.active ? 'bg-green-900/50 text-green-400' : 'bg-zinc-800 text-zinc-500'}`}
-                >
-                  {pack.active ? <Check size={14} /> : <X size={14} />}
-                </button>
-              </div>
-            </div>
-          </Card>
-        ))
+            </Card>
+          )
+        })
       )}
 
+      {/* ── Modal crear / editar pack ─────────────────────── */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editPack ? 'Editar pack' : 'Nuevo pack'} size="lg">
         <form onSubmit={handleSave} className="space-y-4">
-          <Input label="Nombre del pack *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required placeholder="Ej: Pack Fan" />
-          <Input label="Precio de venta (€) *" type="number" step="0.01" min="0" value={form.sale_price} onChange={e => setForm(f => ({ ...f, sale_price: e.target.value }))} required />
 
+          {/* Preview collage */}
+          {previewItems.length > 0 && (
+            <div className="relative w-full h-28 rounded-2xl overflow-hidden bg-zinc-800">
+              <PackCollage items={previewItems} />
+            </div>
+          )}
+
+          <Input
+            label="Nombre del pack *"
+            value={form.name}
+            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+            required
+            placeholder="Ej: Pack Fan"
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Precio de venta (€) *"
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0.00"
+              value={form.sale_price}
+              onChange={e => setForm(f => ({ ...f, sale_price: e.target.value }))}
+              required
+            />
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-zinc-300">Stock disponible</label>
+              <div className={`flex items-center h-[46px] px-3 rounded-xl border font-bold text-sm ${
+                packItems.length === 0
+                  ? 'border-zinc-800 text-zinc-600'
+                  : modalStock === 0
+                    ? 'border-red-900/60 text-red-400'
+                    : 'border-zinc-800 text-white'
+              }`}>
+                {packItems.length > 0 ? (
+                  <span>{modalStock === 0 ? 'AGOTADO' : `${modalStock} uds`}</span>
+                ) : '—'}
+              </div>
+            </div>
+          </div>
+
+          {/* Ahorro preview */}
+          {packSalePrice > 0 && normalTotal > 0 && (
+            <div className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs ${
+              savings > 0.01 ? 'bg-green-950/50 border border-green-900/60' : 'bg-zinc-800/50'
+            }`}>
+              <span className="text-zinc-400">Sin pack: <span className="line-through text-zinc-500">{formatCurrency(normalTotal)}</span></span>
+              {savings > 0.01
+                ? <span className="text-green-400 font-bold">Ahorro: {formatCurrency(savings)}</span>
+                : <span className="text-zinc-600">Sin descuento</span>
+              }
+            </div>
+          )}
+
+          {/* Productos */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-zinc-300">Productos incluidos</label>
-              <button type="button" onClick={addPackItem} className="text-white text-sm flex items-center gap-1">
-                <Plus size={14} /> Añadir
+              <label className="text-sm font-medium text-zinc-300">
+                Productos incluidos {packItems.length > 0 && <span className="text-zinc-500 font-normal">({packItems.length})</span>}
+              </label>
+              <button
+                type="button"
+                onClick={addPackItem}
+                disabled={products.length === 0}
+                className="flex items-center gap-1 text-white text-xs px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition-colors disabled:opacity-40"
+              >
+                <Plus size={12} /> Añadir
               </button>
             </div>
-            <div className="space-y-2">
-              {packItems.map((item, idx) => (
-                <div key={idx} className="flex gap-2 items-center">
-                  <select
-                    value={item.product_id}
-                    onChange={e => updatePackItem(idx, 'product_id', e.target.value)}
-                    className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl py-2 px-3 text-white text-sm focus:outline-none focus:border-white"
-                  >
-                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                  <input
-                    type="number"
-                    min="1"
-                    value={item.quantity}
-                    onChange={e => updatePackItem(idx, 'quantity', parseInt(e.target.value) || 1)}
-                    className="w-14 bg-zinc-800 border border-zinc-700 rounded-xl py-2 px-2 text-white text-sm focus:outline-none focus:border-white text-center"
-                  />
-                  <button type="button" onClick={() => removePackItem(idx)} className="p-2 text-red-500">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
+
+            {packItems.length === 0 ? (
+              <div className="flex items-center gap-2 bg-zinc-800/50 rounded-xl px-3 py-3 text-zinc-600">
+                <AlertCircle size={14} />
+                <p className="text-xs">Añade al menos un producto al pack</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {packItems.map((item, idx) => {
+                  const product = products.find(p => p.id === item.product_id)
+                  return (
+                    <div key={idx} className="bg-zinc-800/60 rounded-xl p-2.5 space-y-2">
+                      <div className="flex gap-2 items-center">
+                        {/* Thumbnail */}
+                        <div className="w-9 h-9 rounded-lg bg-zinc-700 overflow-hidden shrink-0">
+                          {product?.image_url ? (
+                            <img src={product.image_url} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Package size={13} className="text-zinc-600" />
+                            </div>
+                          )}
+                        </div>
+
+                        <select
+                          value={item.product_id}
+                          onChange={e => updatePackItem(idx, 'product_id', e.target.value)}
+                          className="flex-1 min-w-0 bg-zinc-700 border border-zinc-600 rounded-xl py-2 px-2 text-white text-xs focus:outline-none focus:border-white"
+                        >
+                          {products.map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} (stock: {p.stock})
+                            </option>
+                          ))}
+                        </select>
+
+                        <div className="flex flex-col items-center gap-0.5 shrink-0">
+                          <span className="text-zinc-600 text-[9px] uppercase tracking-wide">Cant.</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={e => updatePackItem(idx, 'quantity', parseInt(e.target.value) || 1)}
+                            className="w-12 bg-zinc-700 border border-zinc-600 rounded-xl py-1.5 px-1 text-white text-xs focus:outline-none focus:border-white text-center"
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => removePackItem(idx)}
+                          className="p-1.5 text-red-500 hover:text-red-400 transition-colors shrink-0"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+
+                      {/* Precio en pack */}
+                      <div className="flex items-center gap-2 pl-11">
+                        <label className="text-xs text-zinc-500 shrink-0">Precio en pack (€):</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder={product ? String(product.sale_price) : '0.00'}
+                          value={item.individual_pack_price}
+                          onChange={e => updatePackItem(idx, 'individual_pack_price', e.target.value)}
+                          className="w-20 bg-zinc-700 border border-zinc-600 rounded-lg py-1 px-2 text-white text-xs focus:outline-none focus:border-white"
+                        />
+                        {product && (
+                          <span className="text-xs text-zinc-600">normal: {formatCurrency(product.sale_price)}</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
-          <div className="flex gap-3 pt-2">
-            <Button type="button" variant="outline" fullWidth onClick={() => setShowModal(false)}>Cancelar</Button>
-            <Button type="submit" fullWidth loading={saving}>{editPack ? 'Guardar' : 'Crear pack'}</Button>
+          {apiError && (
+            <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2">
+              <p className="text-red-400 text-sm">{apiError}</p>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <Button type="button" variant="outline" fullWidth onClick={() => setShowModal(false)}>
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              fullWidth
+              loading={saving}
+              disabled={!form.name.trim() || !form.sale_price || packItems.length === 0}
+            >
+              {editPack ? 'Guardar cambios' : 'Crear pack'}
+            </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* ── Confirmación de borrado ────────────────────────── */}
+      <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Eliminar pack" size="sm">
+        <div className="space-y-4">
+          <p className="text-zinc-300 text-sm">
+            ¿Eliminar el pack <span className="text-white font-bold">"{confirmDelete?.name}"</span>?{' '}
+            Esta acción no se puede deshacer. No afecta el stock de los productos.
+          </p>
+          <div className="flex gap-3">
+            <Button variant="outline" fullWidth onClick={() => setConfirmDelete(null)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" fullWidth loading={deleting} onClick={handleDelete}>
+              Eliminar
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   )

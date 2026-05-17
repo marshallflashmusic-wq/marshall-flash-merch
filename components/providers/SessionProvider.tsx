@@ -1,12 +1,23 @@
 'use client'
 import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useAppStore } from '@/store/appStore'
 import { getPendingSales, deleteSyncedSale } from '@/lib/offline/db'
 import type { User } from '@/types'
 
 export default function SessionProvider({ children }: { children: React.ReactNode }) {
-  const { setUser, setIsOnline, setPendingSyncCount } = useAppStore()
+  const router = useRouter()
+  const { setUser, setIsOnline, setPendingSyncCount, tpvSession, setTpvSession, setSaleMode } = useAppStore()
+
+  // Comprobar expiración de sesión TPV al montar
+  useEffect(() => {
+    if (tpvSession && new Date(tpvSession.expiresAt) < new Date()) {
+      setTpvSession(null)
+      setSaleMode(false)
+      router.push('/login')
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const supabase = createClient()
@@ -14,16 +25,19 @@ export default function SessionProvider({ children }: { children: React.ReactNod
     const loadProfile = async (userId: string, email?: string) => {
       const name = email ? email.split('@')[0] : 'Admin'
 
-      // El acceso con contraseña ES el acceso admin — forzar role admin en estado local
       const buildAdmin = (base?: Partial<User>): User => ({
         id: userId,
         email: email ?? '',
         name,
-        role: 'admin',
         active: true,
         created_at: new Date().toISOString(),
         ...base,
+        role: 'admin', // siempre admin, después del spread
       })
+
+      // Admin logueado con Supabase → nunca en modo venta
+      setSaleMode(false)
+      setTpvSession(null)
 
       const { data, error } = await supabase
         .from('profiles')
@@ -32,7 +46,6 @@ export default function SessionProvider({ children }: { children: React.ReactNod
         .single()
 
       if (data) {
-        // Siempre admin en local; si en DB no lo es, intentar actualizar
         setUser(buildAdmin(data as Partial<User>))
         if ((data as User).role !== 'admin') {
           await supabase.from('profiles').update({ role: 'admin' }).eq('id', userId)
@@ -41,13 +54,15 @@ export default function SessionProvider({ children }: { children: React.ReactNod
       }
 
       if (error?.code === 'PGRST116') {
-        // No existe perfil — intentar crearlo
         const { data: created } = await supabase
           .from('profiles')
           .upsert({ id: userId, email: email ?? '', name, role: 'admin', active: true })
           .select('*')
           .single()
         setUser(created ? buildAdmin(created as Partial<User>) : buildAdmin())
+      } else {
+        // Cualquier otro error — construir usuario mínimo con rol admin
+        setUser(buildAdmin())
       }
     }
 
@@ -98,7 +113,7 @@ export default function SessionProvider({ children }: { children: React.ReactNod
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
-  }, [setUser, setIsOnline, setPendingSyncCount])
+  }, [setUser, setIsOnline, setPendingSyncCount, setSaleMode, setTpvSession])
 
   return <>{children}</>
 }

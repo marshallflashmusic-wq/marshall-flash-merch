@@ -7,7 +7,7 @@ import type { Sale, SaleFilters, CartItem, PaymentMethod, OfflineSale } from '@/
 
 export function useSales() {
   const [loading, setLoading] = useState(false)
-  const { user, activeEvent, isOnline, setPendingSyncCount } = useAppStore()
+  const { user, activeEvent, isOnline, setPendingSyncCount, tpvSession } = useAppStore()
 
   const createSale = useCallback(async (
     items: CartItem[],
@@ -31,16 +31,23 @@ export function useSales() {
         profit:     (item.unit_price - item.unit_cost) * item.quantity,
       }))
 
-      const stockDecrements: { product_id: string; quantity: number }[] = []
+      const stockDecrements: { product_id: string; quantity: number; movement_type: string }[] = []
       for (const item of items) {
         if (item.type === 'product' && item.product) {
-          stockDecrements.push({ product_id: item.product.id, quantity: item.quantity })
+          stockDecrements.push({ product_id: item.product.id, quantity: item.quantity, movement_type: 'sale' })
         } else if (item.type === 'pack' && item.pack?.items) {
           for (const packItem of item.pack.items) {
-            stockDecrements.push({ product_id: packItem.product_id, quantity: packItem.quantity * item.quantity })
+            stockDecrements.push({
+              product_id: packItem.product_id,
+              quantity: packItem.quantity * item.quantity,
+              movement_type: 'pack_sale',
+            })
           }
         }
       }
+
+      const sellerName = tpvSession?.sellerName ?? user?.name ?? null
+      const sellerType: 'admin' | 'tpv' = tpvSession ? 'tpv' : 'admin'
 
       const saleData = {
         event_id:       eventId ?? activeEvent?.id ?? undefined,
@@ -50,6 +57,8 @@ export function useSales() {
         total_cost:     cost,
         profit,
         notes:          notes || null,
+        seller_name:    sellerName,
+        seller_type:    sellerType,
       }
 
       if (!isOnline) {

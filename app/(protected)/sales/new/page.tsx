@@ -1,11 +1,10 @@
 'use client'
 import { useState } from 'react'
-import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import {
   ShoppingCart, Plus, Minus, Trash2, Package, Check,
   Banknote, CreditCard, Smartphone, Wallet, ChevronRight,
-  Package2, LogOut, Wifi, WifiOff, RefreshCw, X,
+  Package2, LogOut, Wifi, WifiOff, RefreshCw, X, Tag,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useProducts } from '@/hooks/useProducts'
@@ -16,6 +15,7 @@ import { useAppStore } from '@/store/appStore'
 import { formatCurrency } from '@/lib/utils'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import PackCollage from '@/components/ui/PackCollage'
 import type { PaymentMethod, Product, Pack } from '@/types'
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: React.ElementType; color: string }[] = [
@@ -28,8 +28,8 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: React.Elemen
 
 export default function NewSalePage() {
   const router = useRouter()
-  const { products, loading: loadingProducts } = useProducts()
-  const { packs, loading: loadingPacks } = usePacks()
+  const { products, loading: loadingProducts, refetch: refetchProducts } = useProducts()
+  const { packs, loading: loadingPacks, refetch: refetchPacks } = usePacks()
   const { createSale, loading: creating } = useSales()
   const cart = useCartStore()
   const { isSaleMode, isOnline, pendingSyncCount, setSaleMode } = useAppStore()
@@ -50,6 +50,8 @@ export default function NewSalePage() {
       setShowSuccess(true)
       cart.clearCart()
       setSaleNotes('')
+      refetchProducts()
+      refetchPacks()
       setTimeout(() => setShowSuccess(false), 2200)
     } else {
       setSaleError(result.error ?? 'No se pudo registrar la venta')
@@ -70,7 +72,6 @@ export default function NewSalePage() {
 
       {/* Header ultra compacto */}
       <div className="flex items-center justify-end gap-2 px-3 py-2 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800 shrink-0">
-        {/* Estado sync */}
         <div className="flex items-center gap-1.5">
           {pendingSyncCount > 0 && (
             <div className="flex items-center gap-1 bg-zinc-800 border border-zinc-700 rounded-full px-2 py-0.5">
@@ -83,7 +84,6 @@ export default function NewSalePage() {
           </div>
         </div>
 
-        {/* Botón carrito */}
         {cartCount > 0 && (
           <button
             onClick={() => setShowCart(true)}
@@ -96,7 +96,6 @@ export default function NewSalePage() {
           </button>
         )}
 
-        {/* Salir modo venta */}
         {isSaleMode && (
           <button
             onClick={handleExitSaleMode}
@@ -107,34 +106,44 @@ export default function NewSalePage() {
         )}
       </div>
 
-      {/* Tabs: Productos / Packs */}
-      {packs.length > 0 && (
-        <div className="flex border-b border-zinc-800 shrink-0">
-          <button
-            onClick={() => setTab('products')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors ${
-              tab === 'products' ? 'text-white border-b-2 border-white' : 'text-zinc-500'
-            }`}
-          >
-            <Package size={15} />
-            Productos
-          </button>
-          <button
-            onClick={() => setTab('packs')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors ${
-              tab === 'packs' ? 'text-white border-b-2 border-white' : 'text-zinc-500'
-            }`}
-          >
-            <Package2 size={15} />
-            Packs
-          </button>
-        </div>
-      )}
+      {/* ── Tabs: Artículos / Packs ─── siempre visibles */}
+      <div className="flex shrink-0 bg-zinc-950 border-b border-zinc-800">
+        <button
+          onClick={() => setTab('products')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-all ${
+            tab === 'products'
+              ? 'text-white border-b-2 border-white'
+              : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          <Package size={16} />
+          Artículos
+          {tab === 'products' && products.length > 0 && (
+            <span className="bg-white/10 text-white text-xs px-1.5 py-0.5 rounded-full">{products.length}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setTab('packs')}
+          className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-all ${
+            tab === 'packs'
+              ? 'text-white border-b-2 border-white'
+              : 'text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          <Package2 size={16} />
+          Packs
+          {tab === 'packs' && packs.length > 0 && (
+            <span className="bg-white/10 text-white text-xs px-1.5 py-0.5 rounded-full">{packs.length}</span>
+          )}
+        </button>
+      </div>
 
-      {/* Grid de productos — cards cuadradas grandes */}
+      {/* ── Contenido de tabs ── */}
       <div className="flex-1 overflow-y-auto p-3">
         {tab === 'products' ? (
-          loadingProducts ? <LoadingSpinner /> : (
+          loadingProducts ? <LoadingSpinner /> : products.length === 0 ? (
+            <EmptyState icon={<Package size={40} />} text="No hay productos activos" />
+          ) : (
             <div className="grid grid-cols-2 gap-3">
               {products.map(product => (
                 <ProductCard
@@ -151,7 +160,13 @@ export default function NewSalePage() {
             </div>
           )
         ) : (
-          loadingPacks ? <LoadingSpinner /> : (
+          loadingPacks ? <LoadingSpinner /> : packs.length === 0 ? (
+            <EmptyState
+              icon={<Package2 size={40} />}
+              text="No hay packs configurados"
+              hint="Crea packs en Configuración → Packs"
+            />
+          ) : (
             <div className="grid grid-cols-2 gap-3">
               {packs.map(pack => (
                 <PackCard
@@ -219,7 +234,7 @@ export default function NewSalePage() {
   )
 }
 
-// ─── Tarjeta de producto: imagen cuadrada grande ───────────────────────────
+// ─── Tarjeta de producto ────────────────────────────────────────────────────
 
 function ProductCard({
   product, quantity, onAdd, onDecrease,
@@ -236,42 +251,38 @@ function ProductCard({
     <div className={`relative flex flex-col bg-zinc-900 border rounded-2xl overflow-hidden transition-all ${
       quantity > 0 ? 'border-white shadow-lg shadow-white/10' : isOutOfStock ? 'border-zinc-800 opacity-40' : 'border-zinc-800'
     }`}>
-      {/* Imagen cuadrada — toca para añadir */}
       <button
         onClick={onAdd}
         disabled={isOutOfStock}
         className="relative w-full aspect-square bg-zinc-800 active:scale-95 transition-transform"
       >
         {product.image_url ? (
-          <Image src={product.image_url} alt={product.name} fill className="object-cover" />
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={product.image_url} alt={product.name} className="absolute inset-0 w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <Package size={36} className="text-zinc-600" />
           </div>
         )}
 
-        {/* Badge de cantidad */}
         {quantity > 0 && (
-          <div className="absolute top-2 right-2 w-7 h-7 bg-white rounded-full flex items-center justify-center shadow-lg">
+          <div className="absolute top-2 right-2 w-7 h-7 bg-white rounded-full flex items-center justify-center shadow-lg z-10">
             <span className="text-black text-sm font-black">{quantity}</span>
           </div>
         )}
 
-        {/* Badge stock bajo */}
         {isLowStock && (
-          <div className="absolute top-2 left-2 bg-white/90 rounded-lg px-1.5 py-0.5">
+          <div className="absolute top-2 left-2 bg-white/90 rounded-lg px-1.5 py-0.5 z-10">
             <span className="text-black text-xs font-bold">¡{product.stock}!</span>
           </div>
         )}
       </button>
 
-      {/* Info + controles */}
       <div className="p-2.5">
         <p className="text-white text-sm font-semibold leading-tight line-clamp-1">{product.name}</p>
         <div className="flex items-center justify-between mt-1.5">
           <p className="text-white font-black text-base">{formatCurrency(product.sale_price)}</p>
 
-          {/* Controles de cantidad cuando hay algo en el carrito */}
           {quantity > 0 && (
             <div className="flex items-center gap-1.5">
               <button
@@ -294,7 +305,7 @@ function ProductCard({
   )
 }
 
-// ─── Tarjeta de pack ────────────────────────────────────────────────────────
+// ─── Tarjeta de pack (cuadrada, igual que producto) ───────────────────────
 
 function PackCard({
   pack, quantity, onAdd, onDecrease,
@@ -304,36 +315,83 @@ function PackCard({
   onAdd: () => void
   onDecrease: () => void
 }) {
+  const availableStock = pack.available_stock ?? 0
+  const isOutOfStock = availableStock === 0
+  const atMax = quantity >= availableStock && !isOutOfStock
+
+  const normalTotal = pack.items?.reduce((acc, i) => acc + (i.product?.sale_price ?? 0) * i.quantity, 0) ?? 0
+  const savings = normalTotal > 0 ? normalTotal - pack.sale_price : 0
+
   return (
-    <div className={`flex flex-col bg-zinc-900 border rounded-2xl overflow-hidden transition-all ${
-      quantity > 0 ? 'border-white shadow-lg shadow-white/10' : 'border-zinc-800'
+    <div className={`relative flex flex-col bg-zinc-900 border rounded-2xl overflow-hidden transition-all ${
+      quantity > 0 ? 'border-white shadow-lg shadow-white/10' : isOutOfStock ? 'border-zinc-800 opacity-40' : 'border-zinc-800'
     }`}>
+      {/* Collage cuadrado */}
       <button
         onClick={onAdd}
-        className="relative w-full aspect-square bg-gradient-to-br from-zinc-700 to-zinc-800 flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform"
+        disabled={isOutOfStock || atMax}
+        className="relative w-full aspect-square bg-zinc-800 active:scale-95 transition-transform disabled:active:scale-100"
       >
-        <Package2 size={40} className="text-white" />
+        <PackCollage items={pack.items ?? []} />
+
         {quantity > 0 && (
-          <div className="absolute top-2 right-2 w-7 h-7 bg-white rounded-full flex items-center justify-center">
+          <div className="absolute top-2 right-2 w-7 h-7 bg-white rounded-full flex items-center justify-center shadow-lg z-10">
             <span className="text-black text-sm font-black">{quantity}</span>
           </div>
         )}
+
+        {savings > 0.01 && quantity === 0 && !isOutOfStock && (
+          <div className="absolute top-2 left-2 flex items-center gap-0.5 bg-green-500/90 backdrop-blur-sm rounded-lg px-1.5 py-0.5 z-10">
+            <Tag size={9} className="text-white" />
+            <span className="text-white text-[10px] font-black">-{formatCurrency(savings)}</span>
+          </div>
+        )}
+
+        {isOutOfStock && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-10">
+            <span className="bg-red-500 text-white text-xs font-black px-3 py-1 rounded-full uppercase tracking-wide">
+              AGOTADO
+            </span>
+          </div>
+        )}
       </button>
+
+      {/* Info */}
       <div className="p-2.5">
-        <p className="text-white text-sm font-semibold line-clamp-1">{pack.name}</p>
+        <p className="text-white text-base font-semibold leading-tight line-clamp-1">{pack.name}</p>
+        {pack.items && pack.items.length > 0 && (
+          <p className="text-zinc-500 text-sm mt-0.5 line-clamp-2">
+            {pack.items.map(i =>
+              `${i.quantity > 1 ? `${i.quantity}× ` : ''}${i.product?.name ?? '?'}`
+            ).join(' · ')}
+          </p>
+        )}
         <div className="flex items-center justify-between mt-1.5">
-          <p className="text-white font-black text-base">{formatCurrency(pack.sale_price)}</p>
-          {quantity > 0 && (
+          {quantity > 0 ? (
             <div className="flex items-center gap-1.5">
-              <button onClick={onDecrease} className="w-6 h-6 rounded-lg bg-zinc-800 flex items-center justify-center active:scale-90">
+              <button
+                onClick={onDecrease}
+                className="w-6 h-6 rounded-lg bg-zinc-800 flex items-center justify-center active:scale-90"
+              >
                 <Minus size={11} />
               </button>
-              <button onClick={onAdd} className="w-6 h-6 rounded-lg bg-white flex items-center justify-center active:scale-90">
+              <button
+                onClick={onAdd}
+                disabled={atMax}
+                className="w-6 h-6 rounded-lg bg-white flex items-center justify-center active:scale-90 disabled:opacity-30"
+              >
                 <Plus size={11} className="text-black" strokeWidth={3} />
               </button>
             </div>
-          )}
+          ) : <span />}
+          <p className="text-white font-black text-xl">{formatCurrency(pack.sale_price)}</p>
         </div>
+
+        {!isOutOfStock && (
+          <p className="text-zinc-600 text-[10px] mt-0.5">
+            {availableStock} disponible{availableStock !== 1 ? 's' : ''}
+          </p>
+        )}
       </div>
     </div>
   )
@@ -353,7 +411,6 @@ function CartModal({ open, onClose, notes, onNotesChange, onConfirm }: {
   return (
     <Modal open={open} onClose={onClose} title="Resumen de venta" size="lg">
       <div className="space-y-4">
-        {/* Items */}
         {cart.items.length === 0 ? (
           <div className="flex flex-col items-center py-8 text-zinc-600">
             <ShoppingCart size={32} />
@@ -404,7 +461,9 @@ function CartModal({ open, onClose, notes, onNotesChange, onConfirm }: {
                 }`}
               >
                 <Icon size={20} className={cart.paymentMethod === value ? 'text-white' : color} />
-                <span className={`text-[10px] font-medium leading-tight text-center ${cart.paymentMethod === value ? 'text-white' : 'text-zinc-500'}`}>{label}</span>
+                <span className={`text-[10px] font-medium leading-tight text-center ${cart.paymentMethod === value ? 'text-white' : 'text-zinc-500'}`}>
+                  {label}
+                </span>
               </button>
             ))}
           </div>
@@ -430,7 +489,7 @@ function CartModal({ open, onClose, notes, onNotesChange, onConfirm }: {
           </div>
           <div className="flex justify-between font-black text-xl text-white">
             <span>TOTAL</span>
-            <span className="text-white">{formatCurrency(cart.total())}</span>
+            <span>{formatCurrency(cart.total())}</span>
           </div>
         </div>
 
@@ -499,10 +558,22 @@ function ConfirmModal({ open, onBack, onConfirm, loading, error }: {
   )
 }
 
+// ─── Utilidades ─────────────────────────────────────────────────────────────
+
 function LoadingSpinner() {
   return (
     <div className="flex items-center justify-center py-20">
       <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+}
+
+function EmptyState({ icon, text, hint }: { icon: React.ReactNode; text: string; hint?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 text-zinc-600">
+      {icon}
+      <p className="mt-3 text-sm">{text}</p>
+      {hint && <p className="mt-1 text-xs text-zinc-700">{hint}</p>}
     </div>
   )
 }
