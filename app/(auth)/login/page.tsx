@@ -82,7 +82,7 @@ export default function LoginPage() {
             <img src="/icons/icon-512.png" alt="MyMerch" className="w-full h-full object-cover" />
           </div>
           <h1 className="text-xl font-black text-white tracking-tight">MyMerch</h1>
-          <p className="text-zinc-600 text-xs mt-0.5">Punto de venta</p>
+          <p className="text-zinc-600 text-xs mt-0.5">Gestión de inventario y Punto de venta</p>
         </div>
 
         {/* MODO VENTA — con PIN */}
