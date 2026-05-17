@@ -59,7 +59,7 @@ export default function BottomNav() {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 safe-bottom">
       <div className="flex items-end justify-around px-1 pt-1 pb-2">
-        {nav.map(({ href, icon: Icon, label, primary }) => {
+        {adminNav.map(({ href, icon: Icon, label, primary }) => {
           const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
           return (
             <Link
