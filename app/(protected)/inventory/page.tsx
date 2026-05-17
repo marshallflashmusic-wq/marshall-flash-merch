@@ -677,7 +677,7 @@ function SortableProductCard({ product, canReorder, onEdit, onToggleActive, onSt
             {/* Pills de talla */}
             {product.variants && product.variants.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-1.5">
-                {product.variants.map(v => (
+                {product.variants.slice().sort((a, b) => SIZES.indexOf(a.size) - SIZES.indexOf(b.size)).map(v => (
                   <span
                     key={v.size}
                     className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
