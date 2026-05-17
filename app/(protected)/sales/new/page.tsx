@@ -532,13 +532,13 @@ function ConfirmModal({ open, onBack, onConfirm, loading, error }: {
 
   return (
     <Modal open={open} onClose={onBack} size="sm" showClose={false}>
-      <div className="flex flex-col items-center gap-5 py-2">
-        <div className="w-20 h-20 bg-white/10 border-2 border-white/20 rounded-full flex items-center justify-center">
-          <Icon size={36} className="text-white" />
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-14 h-14 bg-white/10 border-2 border-white/20 rounded-full flex items-center justify-center">
+          <Icon size={26} className="text-white" />
         </div>
         <div className="text-center">
           <p className="text-zinc-400 text-sm mb-1">{selectedPayment?.label}</p>
-          <p className="text-white text-5xl font-black">{formatCurrency(cart.total())}</p>
+          <p className="text-white text-4xl font-black">{formatCurrency(cart.total())}</p>
           <p className="text-zinc-500 text-sm mt-1">{cart.itemCount()} artículo{cart.itemCount() !== 1 ? 's' : ''}</p>
         </div>
         {error && (
@@ -547,10 +547,10 @@ function ConfirmModal({ open, onBack, onConfirm, loading, error }: {
           </div>
         )}
         <div className="flex gap-3 w-full">
-          <Button variant="outline" fullWidth size="lg" onClick={onBack} disabled={loading}>
+          <Button variant="outline" size="lg" onClick={onBack} disabled={loading} className="px-5 shrink-0">
             ← Atrás
           </Button>
-          <Button fullWidth size="xl" onClick={onConfirm} loading={loading}>
+          <Button fullWidth size="lg" onClick={onConfirm} loading={loading}>
             {loading ? 'Procesando...' : 'COBRAR'}
           </Button>
         </div>

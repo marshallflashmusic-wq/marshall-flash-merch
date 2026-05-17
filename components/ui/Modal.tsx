@@ -58,7 +58,7 @@ export default function Modal({ open, onClose, title, children, size = 'md', sho
             )}
           </div>
         )}
-        <div className="p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] max-h-[85vh] overflow-y-auto">
+        <div className="p-5 max-h-[80vh] overflow-y-auto">
           {children}
         </div>
       </div>
