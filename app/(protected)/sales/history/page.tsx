@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Clock, Filter, Banknote, Smartphone, CreditCard, Wallet, Download, X, Trash2, MessageSquare, Pencil, Package2 } from 'lucide-react'
 import { useSalesHistory } from '@/hooks/useSales'
 import { useEvents } from '@/hooks/useEvents'
@@ -52,6 +52,17 @@ export default function SalesHistoryPage() {
   const [editError, setEditError] = useState('')
   const { sales, loading, total, refetch } = useSalesHistory(filters)
   const { isSaleMode } = useAppStore()
+
+  // Auto-refresco cada 10s + al volver a la pestaña
+  useEffect(() => {
+    const interval = setInterval(refetch, 10_000)
+    const handleVisibility = () => { if (document.visibilityState === 'visible') refetch() }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [refetch])
 
   const handleDelete = (sale: Sale) => {
     setSelectedSale(null)

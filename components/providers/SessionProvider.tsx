@@ -10,13 +10,33 @@ export default function SessionProvider({ children }: { children: React.ReactNod
   const router = useRouter()
   const { setUser, setIsOnline, setPendingSyncCount, tpvSession, setTpvSession, setSaleMode } = useAppStore()
 
-  // Comprobar expiración de sesión TPV al montar
+  // Comprobar sesión TPV al montar y cada 15s: si el admin la revoca o expira → logout inmediato
   useEffect(() => {
-    if (tpvSession && new Date(tpvSession.expiresAt) < new Date()) {
-      setTpvSession(null)
-      setSaleMode(false)
-      router.push('/login')
+    if (!tpvSession) return
+
+    const checkSession = async () => {
+      if (new Date(tpvSession.expiresAt) < new Date()) {
+        setTpvSession(null)
+        setSaleMode(false)
+        router.push('/login')
+        return
+      }
+      try {
+        const res = await fetch(`/api/tpv-sessions/check?id=${tpvSession.id}`)
+        const { valid } = await res.json()
+        if (!valid) {
+          setTpvSession(null)
+          setSaleMode(false)
+          router.push('/login')
+        }
+      } catch {
+        // Sin conexión: mantener sesión hasta que vuelva internet
+      }
     }
+
+    checkSession()
+    const interval = setInterval(checkSession, 15_000)
+    return () => clearInterval(interval)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
