@@ -306,8 +306,13 @@ function ProductCard({
         )}
 
         {isLowStock && (
-          <div className="absolute top-2 left-2 bg-white/90 rounded-lg px-1.5 py-0.5 z-10">
-            <span className="text-black text-xs font-bold">¡{product.stock}!</span>
+          <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-0.5">
+            <span className="bg-orange-500 text-white text-[10px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-md leading-none shadow-lg shadow-orange-500/40">
+              Stock bajo
+            </span>
+            <span className="bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-md leading-none shadow-lg shadow-red-600/40">
+              {product.stock} ud{product.stock !== 1 ? 's' : ''}
+            </span>
           </div>
         )}
       </button>
