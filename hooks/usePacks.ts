@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import type { Pack, PackItem } from '@/types'
 
 export function calcAvailableStock(items: PackItem[]): number {
@@ -33,7 +34,15 @@ export function usePacks() {
     }
   }, [])
 
-  useEffect(() => { loadPacks() }, [loadPacks])
+  useEffect(() => {
+    loadPacks()
+    const supabase = createClient()
+    const channel = supabase
+      .channel('merch-sync-packs')
+      .on('broadcast', { event: 'sale' }, () => loadPacks())
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [loadPacks])
 
   return { packs, loading, refetch: loadPacks }
 }

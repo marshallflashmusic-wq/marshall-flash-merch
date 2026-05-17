@@ -36,7 +36,15 @@ export function useProducts() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    const supabase = createClient()
+    const channel = supabase
+      .channel('merch-sync-products')
+      .on('broadcast', { event: 'sale' }, () => load())
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [load])
 
   const updateStock = async (id: string, delta: number) => {
     const supabase = createClient()
@@ -70,7 +78,15 @@ export function useAllProducts() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    const supabase = createClient()
+    const channel = supabase
+      .channel('merch-sync-all-products')
+      .on('broadcast', { event: 'sale' }, () => load())
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [load])
 
   return { products, loading, refetch: load }
 }

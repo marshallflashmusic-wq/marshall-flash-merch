@@ -118,6 +118,15 @@ export function useSales() {
       }
 
       const { sale } = await res.json()
+
+      // Notificar a todos los dispositivos conectados para que refresquen el stock
+      try {
+        const { createClient } = await import('@/lib/supabase/client')
+        createClient().channel('merch-sync').send({
+          type: 'broadcast', event: 'sale', payload: {},
+        })
+      } catch { /* no crítico */ }
+
       return { success: true, saleId: sale.id }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error desconocido'
