@@ -42,21 +42,10 @@ export default function NewSalePage() {
   const [saleNotes, setSaleNotes] = useState('')
   const [saleError, setSaleError] = useState('')
 
-  // Auto-refresco de stock cada 30 segundos + al volver a la pestaña
   const refetchAll = useCallback(() => {
     refetchProducts()
     refetchPacks()
   }, [refetchProducts, refetchPacks])
-
-  useEffect(() => {
-    const interval = setInterval(refetchAll, 8_000)
-    const handleVisibility = () => { if (document.visibilityState === 'visible') refetchAll() }
-    document.addEventListener('visibilitychange', handleVisibility)
-    return () => {
-      clearInterval(interval)
-      document.removeEventListener('visibilitychange', handleVisibility)
-    }
-  }, [refetchAll])
 
 
   const handleConfirmSale = async () => {
