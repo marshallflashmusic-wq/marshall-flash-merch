@@ -6,7 +6,7 @@ interface CartStore {
   items: CartItem[]
   paymentMethod: PaymentMethod
   eventId: string | null
-  addProduct: (product: Product, variant?: ProductVariant) => void
+  addProduct: (product: Product, size?: string, variant?: ProductVariant) => void
   addPack: (pack: Pack, packSizeSelections?: PackSizeSelection[]) => void
   removeItem: (id: string) => void
   updateQuantity: (id: string, quantity: number) => void
@@ -24,13 +24,15 @@ export const useCartStore = create<CartStore>((set, get) => ({
   paymentMethod: 'efectivo',
   eventId: null,
 
-  addProduct: (product: Product, variant?: ProductVariant) => {
+  addProduct: (product: Product, size?: string, variant?: ProductVariant) => {
     const { items } = get()
-    // Productos textiles: cada talla es una línea separada en el carrito
+    const effectiveVariantId = variant?.id || undefined
+    // Productos textiles: clave por (product.id + size) para líneas separadas por talla
     const existing = items.find(i =>
       i.type === 'product' &&
       i.product?.id === product.id &&
-      i.variant_id === (variant?.id ?? undefined)
+      i.size === size &&
+      i.variant_id === effectiveVariantId
     )
     if (existing) {
       set({ items: items.map(i => i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i) })
@@ -45,8 +47,8 @@ export const useCartStore = create<CartStore>((set, get) => ({
             quantity: 1,
             unit_price: product.sale_price,
             unit_cost: product.purchase_price,
-            variant_id: variant?.id,
-            size: variant?.size,
+            variant_id: effectiveVariantId,
+            size,
           },
         ],
       })
