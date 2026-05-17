@@ -48,7 +48,7 @@ export default function NewSalePage() {
   }, [refetchProducts, refetchPacks])
 
   useEffect(() => {
-    const interval = setInterval(refetchAll, 30_000)
+    const interval = setInterval(refetchAll, 8_000)
     const handleVisibility = () => { if (document.visibilityState === 'visible') refetchAll() }
     document.addEventListener('visibilitychange', handleVisibility)
     return () => {
