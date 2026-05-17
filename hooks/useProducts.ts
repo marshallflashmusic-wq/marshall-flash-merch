@@ -63,7 +63,7 @@ export function useAllProducts() {
     const supabase = createClient()
     const { data } = await supabase
       .from('products')
-      .select('*, category:categories(*)')
+      .select('*, category:categories(*), variants:product_variants(*)')
       .order('sort_order', { ascending: true, nullsFirst: true })
       .order('name')
     setProducts(data ?? [])

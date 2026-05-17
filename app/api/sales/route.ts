@@ -93,6 +93,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: rpcError.message }, { status: 500 })
     }
 
+    // Decrementar stock de variantes (tallas) cuando aplica
+    const variantDecrements = (stockDecrements ?? []).filter(
+      (d: { variant_id?: string; quantity: number }) => d.variant_id
+    )
+    for (const decr of variantDecrements as { variant_id: string; quantity: number }[]) {
+      const { data: v } = await supabase
+        .from('product_variants')
+        .select('stock')
+        .eq('id', decr.variant_id)
+        .single()
+      if (v) {
+        await supabase
+          .from('product_variants')
+          .update({ stock: Math.max(0, v.stock - decr.quantity), updated_at: new Date().toISOString() })
+          .eq('id', decr.variant_id)
+      }
+    }
+
     const saleId = (result as { sale_id: string; duplicate: boolean })?.sale_id
     return NextResponse.json({ sale: { id: saleId } })
   } catch (e) {

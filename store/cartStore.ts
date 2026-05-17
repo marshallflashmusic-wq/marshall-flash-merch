@@ -1,13 +1,13 @@
 import { create } from 'zustand'
-import type { CartItem, Product, Pack, PaymentMethod } from '@/types'
+import type { CartItem, Product, Pack, PaymentMethod, ProductVariant, PackSizeSelection } from '@/types'
 import { generateId } from '@/lib/utils'
 
 interface CartStore {
   items: CartItem[]
   paymentMethod: PaymentMethod
   eventId: string | null
-  addProduct: (product: Product) => void
-  addPack: (pack: Pack) => void
+  addProduct: (product: Product, variant?: ProductVariant) => void
+  addPack: (pack: Pack, packSizeSelections?: PackSizeSelection[]) => void
   removeItem: (id: string) => void
   updateQuantity: (id: string, quantity: number) => void
   setPaymentMethod: (method: PaymentMethod) => void
@@ -24,15 +24,16 @@ export const useCartStore = create<CartStore>((set, get) => ({
   paymentMethod: 'efectivo',
   eventId: null,
 
-  addProduct: (product: Product) => {
+  addProduct: (product: Product, variant?: ProductVariant) => {
     const { items } = get()
-    const existing = items.find(i => i.type === 'product' && i.product?.id === product.id)
+    // Productos textiles: cada talla es una línea separada en el carrito
+    const existing = items.find(i =>
+      i.type === 'product' &&
+      i.product?.id === product.id &&
+      i.variant_id === (variant?.id ?? undefined)
+    )
     if (existing) {
-      set({
-        items: items.map(i =>
-          i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i
-        ),
-      })
+      set({ items: items.map(i => i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i) })
     } else {
       set({
         items: [
@@ -44,25 +45,42 @@ export const useCartStore = create<CartStore>((set, get) => ({
             quantity: 1,
             unit_price: product.sale_price,
             unit_cost: product.purchase_price,
+            variant_id: variant?.id,
+            size: variant?.size,
           },
         ],
       })
     }
   },
 
-  addPack: (pack: Pack) => {
+  addPack: (pack: Pack, packSizeSelections?: PackSizeSelection[]) => {
     const { items } = get()
-    const existing = items.find(i => i.type === 'pack' && i.pack?.id === pack.id)
     const packCost = pack.items?.reduce((acc, item) => {
       return acc + (item.product?.purchase_price ?? 0) * item.quantity
     }, 0) ?? 0
 
-    if (existing) {
+    // Si hay selección de tallas, cada venta del pack es siempre una línea nueva
+    if (packSizeSelections && packSizeSelections.length > 0) {
       set({
-        items: items.map(i =>
-          i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i
-        ),
+        items: [
+          ...items,
+          {
+            id: generateId(),
+            type: 'pack',
+            pack,
+            quantity: 1,
+            unit_price: pack.sale_price,
+            unit_cost: packCost,
+            packSizeSelections,
+          },
+        ],
       })
+      return
+    }
+
+    const existing = items.find(i => i.type === 'pack' && i.pack?.id === pack.id && !i.packSizeSelections?.length)
+    if (existing) {
+      set({ items: items.map(i => i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i) })
     } else {
       set({
         items: [
@@ -89,9 +107,7 @@ export const useCartStore = create<CartStore>((set, get) => ({
       get().removeItem(id)
       return
     }
-    set({
-      items: get().items.map(i => (i.id === id ? { ...i, quantity } : i)),
-    })
+    set({ items: get().items.map(i => (i.id === id ? { ...i, quantity } : i)) })
   },
 
   setPaymentMethod: (method) => set({ paymentMethod: method }),

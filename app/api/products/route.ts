@@ -13,7 +13,7 @@ export async function GET() {
     const supabase = getServiceClient()
     const { data, error } = await supabase
       .from('products')
-      .select('*, category:categories(*)')
+      .select('*, category:categories(*), variants:product_variants(*)')
       .eq('active', true)
       .order('sort_order', { ascending: true, nullsFirst: true })
       .order('name')

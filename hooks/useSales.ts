@@ -37,16 +37,24 @@ export function useSales() {
         profit:     (item.unit_price - item.unit_cost) * item.quantity,
       }))
 
-      const stockDecrements: { product_id: string; quantity: number; movement_type: string }[] = []
+      const stockDecrements: { product_id: string; quantity: number; movement_type: string; variant_id?: string }[] = []
       for (const item of items) {
         if (item.type === 'product' && item.product) {
-          stockDecrements.push({ product_id: item.product.id, quantity: item.quantity, movement_type: 'sale' })
+          stockDecrements.push({
+            product_id: item.product.id,
+            quantity: item.quantity,
+            movement_type: 'sale',
+            variant_id: item.variant_id,
+          })
         } else if (item.type === 'pack' && item.pack?.items) {
           for (const packItem of item.pack.items) {
+            // Buscar si hay selección de talla para este producto del pack
+            const sizeSelection = item.packSizeSelections?.find(s => s.product_id === packItem.product_id)
             stockDecrements.push({
               product_id: packItem.product_id,
               quantity: packItem.quantity * item.quantity,
               movement_type: 'pack_sale',
+              variant_id: sizeSelection?.variant_id,
             })
           }
         }

@@ -17,6 +17,14 @@ export interface Category {
   created_at: string
 }
 
+export interface ProductVariant {
+  id: string
+  product_id: string
+  size: string
+  stock: number
+  updated_at: string
+}
+
 export interface Product {
   id: string
   name: string
@@ -34,6 +42,7 @@ export interface Product {
   active: boolean
   created_at: string
   updated_at: string
+  variants?: ProductVariant[]
 }
 
 export interface Pack {
@@ -129,6 +138,12 @@ export interface InventoryMovement {
   created_at: string
 }
 
+export interface PackSizeSelection {
+  product_id: string
+  variant_id: string
+  size: string
+}
+
 export interface CartItem {
   id: string
   type: 'product' | 'pack'
@@ -137,6 +152,11 @@ export interface CartItem {
   quantity: number
   unit_price: number
   unit_cost: number
+  // Textil individual
+  variant_id?: string
+  size?: string
+  // Pack con artículos textiles
+  packSizeSelections?: PackSizeSelection[]
 }
 
 export interface DashboardStats {

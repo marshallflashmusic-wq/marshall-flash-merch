@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ShoppingCart, Plus, Minus, Trash2, Package, Check,
@@ -17,7 +17,9 @@ import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import PackCollage from '@/components/ui/PackCollage'
 import SwipeableTabs from '@/components/ui/SwipeableTabs'
-import type { PaymentMethod, Product, Pack } from '@/types'
+import type { PaymentMethod, Product, Pack, ProductVariant, PackSizeSelection } from '@/types'
+
+const SIZES_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Única']
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: React.ElementType; color: string }[] = [
   { value: 'efectivo', label: 'Efectivo', icon: Banknote, color: 'text-green-400' },
@@ -41,6 +43,18 @@ export default function NewSalePage() {
   const [showSuccess, setShowSuccess] = useState(false)
   const [saleNotes, setSaleNotes] = useState('')
   const [saleError, setSaleError] = useState('')
+  const [sizePickerProduct, setSizePickerProduct] = useState<Product | null>(null)
+  const [packSizePicker, setPackSizePicker] = useState<Pack | null>(null)
+
+  // Total de unidades en carrito para un producto (suma todas las tallas)
+  const productQty = (productId: string) =>
+    cart.items.filter(i => i.type === 'product' && i.product?.id === productId)
+      .reduce((sum, i) => sum + i.quantity, 0)
+
+  // Total de unidades en carrito para un pack (puede haber varias líneas con tallas distintas)
+  const packQty = (packId: string) =>
+    cart.items.filter(i => i.type === 'pack' && i.pack?.id === packId)
+      .reduce((sum, i) => sum + i.quantity, 0)
 
   const refetchAll = useCallback(() => {
     refetchProducts()
@@ -132,18 +146,26 @@ export default function NewSalePage() {
               <EmptyState icon={<Package size={40} />} text="No hay productos activos" />
             ) : (
               <div className="grid grid-cols-2 gap-3">
-                {products.map(product => (
-                  <ProductCard
-                    key={product.id}
-                    product={product}
-                    quantity={cart.items.find(i => i.type === 'product' && i.product?.id === product.id)?.quantity ?? 0}
-                    onAdd={() => cart.addProduct(product)}
-                    onDecrease={() => {
-                      const item = cart.items.find(i => i.type === 'product' && i.product?.id === product.id)
-                      if (item) cart.updateQuantity(item.id, item.quantity - 1)
-                    }}
-                  />
-                ))}
+                {products.map(product => {
+                  const hasVariants = (product.variants?.length ?? 0) > 0
+                  return (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      quantity={productQty(product.id)}
+                      hasVariants={hasVariants}
+                      onAdd={() => {
+                        if (hasVariants) setSizePickerProduct(product)
+                        else cart.addProduct(product)
+                      }}
+                      onDecrease={() => {
+                        if (hasVariants) return
+                        const item = cart.items.find(i => i.type === 'product' && i.product?.id === product.id)
+                        if (item) cart.updateQuantity(item.id, item.quantity - 1)
+                      }}
+                    />
+                  )
+                })}
               </div>
             ),
           },
@@ -160,18 +182,26 @@ export default function NewSalePage() {
               <EmptyState icon={<Package2 size={40} />} text="No hay packs configurados" hint="Crea packs en Configuración → Packs" />
             ) : (
               <div className="flex flex-col gap-3">
-                {packs.map(pack => (
-                  <PackCard
-                    key={pack.id}
-                    pack={pack}
-                    quantity={cart.items.find(i => i.type === 'pack' && i.pack?.id === pack.id)?.quantity ?? 0}
-                    onAdd={() => cart.addPack(pack)}
-                    onDecrease={() => {
-                      const item = cart.items.find(i => i.type === 'pack' && i.pack?.id === pack.id)
-                      if (item) cart.updateQuantity(item.id, item.quantity - 1)
-                    }}
-                  />
-                ))}
+                {packs.map(pack => {
+                  const textilPackItems = pack.items?.filter(i => (i.product?.variants?.length ?? 0) > 0) ?? []
+                  return (
+                    <PackCard
+                      key={pack.id}
+                      pack={pack}
+                      quantity={packQty(pack.id)}
+                      onAdd={() => {
+                        if (textilPackItems.length > 0) setPackSizePicker(pack)
+                        else cart.addPack(pack)
+                      }}
+                      onDecrease={() => {
+                        // Para packs con tallas, no decrementar desde la card; usar el carrito
+                        if (textilPackItems.length > 0) return
+                        const item = cart.items.find(i => i.type === 'pack' && i.pack?.id === pack.id)
+                        if (item) cart.updateQuantity(item.id, item.quantity - 1)
+                      }}
+                    />
+                  )
+                })}
               </div>
             ),
           },
@@ -223,6 +253,26 @@ export default function NewSalePage() {
           </div>
         </div>
       )}
+
+      {/* Modal selector de talla — artículo individual */}
+      <SizePickerModal
+        open={!!sizePickerProduct}
+        product={sizePickerProduct}
+        onClose={() => setSizePickerProduct(null)}
+        onSelect={variant => {
+          if (sizePickerProduct) cart.addProduct(sizePickerProduct, variant)
+        }}
+      />
+
+      {/* Modal selector de tallas — pack con artículos textiles */}
+      <PackSizePickerModal
+        open={!!packSizePicker}
+        pack={packSizePicker}
+        onClose={() => setPackSizePicker(null)}
+        onConfirm={selections => {
+          if (packSizePicker) cart.addPack(packSizePicker, selections)
+        }}
+      />
     </div>
   )
 }
@@ -230,10 +280,11 @@ export default function NewSalePage() {
 // ─── Tarjeta de producto ────────────────────────────────────────────────────
 
 function ProductCard({
-  product, quantity, onAdd, onDecrease,
+  product, quantity, hasVariants, onAdd, onDecrease,
 }: {
   product: Product
   quantity: number
+  hasVariants: boolean
   onAdd: () => void
   onDecrease: () => void
 }) {
@@ -283,12 +334,14 @@ function ProductCard({
 
           {quantity > 0 && (
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={onDecrease}
-                className="w-6 h-6 rounded-lg bg-zinc-800 flex items-center justify-center active:scale-90"
-              >
-                <Minus size={11} />
-              </button>
+              {!hasVariants && (
+                <button
+                  onClick={onDecrease}
+                  className="w-6 h-6 rounded-lg bg-zinc-800 flex items-center justify-center active:scale-90"
+                >
+                  <Minus size={11} />
+                </button>
+              )}
               <button
                 onClick={onAdd}
                 className="w-6 h-6 rounded-lg bg-white flex items-center justify-center active:scale-90"
@@ -396,6 +449,140 @@ function PackCard({
   )
 }
 
+// ─── Modal selector de talla ─────────────────────────────────────────────────
+
+function SizePickerModal({
+  open, product, onClose, onSelect,
+}: {
+  open: boolean
+  product: Product | null
+  onClose: () => void
+  onSelect: (variant: ProductVariant) => void
+}) {
+  const sortedVariants = (product?.variants ?? [])
+    .slice()
+    .sort((a, b) => SIZES_ORDER.indexOf(a.size) - SIZES_ORDER.indexOf(b.size))
+
+  return (
+    <Modal open={open} onClose={onClose} title="Elige la talla" size="sm">
+      <div className="space-y-3">
+        <p className="text-zinc-400 text-sm font-medium truncate">{product?.name}</p>
+        <div className="space-y-2">
+          {sortedVariants.map(v => {
+            const outOfStock = v.stock === 0
+            const lowStock = v.stock > 0 && v.stock <= 2
+            return (
+              <button
+                key={v.id}
+                disabled={outOfStock}
+                onClick={() => { onSelect(v); onClose() }}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all active:scale-98 ${
+                  outOfStock
+                    ? 'border-zinc-800 opacity-40 cursor-not-allowed'
+                    : 'border-zinc-700 hover:border-white active:bg-white/5'
+                }`}
+              >
+                <span className="text-white font-bold text-xl">{v.size}</span>
+                <span className={`text-sm font-semibold ${
+                  outOfStock ? 'text-red-500' : lowStock ? 'text-amber-400' : 'text-zinc-400'
+                }`}>
+                  {outOfStock ? 'Agotado' : `${v.stock} ud${v.stock !== 1 ? 's' : ''}`}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <Button variant="outline" fullWidth onClick={onClose}>Cancelar</Button>
+      </div>
+    </Modal>
+  )
+}
+
+// ─── Modal selector de tallas para packs ─────────────────────────────────────
+
+function PackSizePickerModal({
+  open, pack, onClose, onConfirm,
+}: {
+  open: boolean
+  pack: Pack | null
+  onClose: () => void
+  onConfirm: (selections: PackSizeSelection[]) => void
+}) {
+  const [selections, setSelections] = useState<Record<string, { variant_id: string; size: string }>>({})
+
+  const textilItems = pack?.items?.filter(i => (i.product?.variants?.length ?? 0) > 0) ?? []
+
+  // Reset al abrir
+  useMemo(() => { setSelections({}) }, [open])
+
+  const allSelected = textilItems.every(i => selections[i.product_id])
+
+  const handleConfirm = () => {
+    const sizeSelections: PackSizeSelection[] = Object.entries(selections).map(([product_id, sel]) => ({
+      product_id,
+      variant_id: sel.variant_id,
+      size: sel.size,
+    }))
+    onConfirm(sizeSelections)
+    onClose()
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Elige las tallas del pack" size="sm">
+      <div className="space-y-4">
+        {textilItems.map(item => (
+          <div key={item.product_id}>
+            <p className="text-zinc-400 text-xs font-semibold uppercase tracking-wider mb-2">
+              {item.product?.name}
+              {item.quantity > 1 && <span className="text-zinc-600 normal-case"> (×{item.quantity})</span>}
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {(item.product?.variants ?? [])
+                .slice()
+                .sort((a, b) => SIZES_ORDER.indexOf(a.size) - SIZES_ORDER.indexOf(b.size))
+                .map(v => {
+                  const selected = selections[item.product_id]?.variant_id === v.id
+                  const outOfStock = v.stock === 0
+                  return (
+                    <button
+                      key={v.id}
+                      disabled={outOfStock}
+                      onClick={() => setSelections(prev => ({
+                        ...prev,
+                        [item.product_id]: { variant_id: v.id, size: v.size },
+                      }))}
+                      className={`py-2.5 rounded-xl border text-center transition-all ${
+                        selected
+                          ? 'border-white bg-white text-black'
+                          : outOfStock
+                            ? 'border-zinc-800 text-zinc-700 cursor-not-allowed'
+                            : 'border-zinc-700 text-zinc-300 hover:border-zinc-400'
+                      }`}
+                    >
+                      <span className="block font-bold text-sm">{v.size}</span>
+                      <span className={`block text-[10px] mt-0.5 ${
+                        selected ? 'text-zinc-600' : outOfStock ? 'text-zinc-700' : v.stock <= 2 ? 'text-amber-400' : 'text-zinc-500'
+                      }`}>
+                        {outOfStock ? 'Agotado' : `${v.stock} uds`}
+                      </span>
+                    </button>
+                  )
+                })}
+            </div>
+          </div>
+        ))}
+
+        <div className="flex gap-3 pt-1">
+          <Button variant="outline" fullWidth onClick={onClose}>Cancelar</Button>
+          <Button fullWidth disabled={!allSelected} onClick={handleConfirm}>
+            Añadir al carrito
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 // ─── Modal carrito ──────────────────────────────────────────────────────────
 
 function CartModal({ open, onClose, notes, onNotesChange, onConfirm }: {
@@ -421,8 +608,15 @@ function CartModal({ open, onClose, notes, onNotesChange, onConfirm }: {
               <div key={item.id} className="flex items-center gap-3 bg-zinc-800 rounded-xl p-3">
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-sm font-medium truncate">
-                    {item.type === 'product' ? item.product?.name : item.pack?.name}
+                    {item.type === 'product'
+                      ? `${item.product?.name}${item.size ? ` · ${item.size}` : ''}`
+                      : item.pack?.name}
                   </p>
+                  {item.packSizeSelections && item.packSizeSelections.length > 0 && (
+                    <p className="text-zinc-500 text-xs mt-0.5">
+                      {item.packSizeSelections.map(s => s.size).join(' · ')}
+                    </p>
+                  )}
                   <p className="text-zinc-500 text-xs">{formatCurrency(item.unit_price)} c/u</p>
                 </div>
                 <div className="flex items-center gap-2">

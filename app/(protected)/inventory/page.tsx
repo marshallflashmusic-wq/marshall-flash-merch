@@ -147,7 +147,11 @@ export default function InventoryPage() {
     refetch()
   }
 
-  const handleSaveProduct = async (data: Partial<Product>, imageFile: File | null): Promise<string | null> => {
+  const handleSaveProduct = async (
+    data: Partial<Product>,
+    imageFile: File | null,
+    sizeStocks?: Record<string, number>
+  ): Promise<string | null> => {
     setSaving(true)
     try {
       const supabase = createClient()
@@ -171,6 +175,8 @@ export default function InventoryPage() {
           .filter(([, v]) => v !== undefined)
       )
 
+      let productId: string | null = editProduct?.id ?? null
+
       if (editProduct?.id) {
         const { error } = await supabase
           .from('products')
@@ -178,11 +184,31 @@ export default function InventoryPage() {
           .eq('id', editProduct.id)
         if (error) throw error
       } else {
-        const { error } = await supabase
+        const { data: inserted, error } = await supabase
           .from('products')
           .insert({ ...payload, active: true })
+          .select('id')
+          .single()
         if (error) throw error
+        productId = inserted.id
       }
+
+      // Guardar variantes de talla si se proporcionaron
+      if (sizeStocks && productId) {
+        await supabase.from('product_variants').delete().eq('product_id', productId)
+        const variants = Object.entries(sizeStocks)
+          .filter(([, stock]) => stock > 0)
+          .map(([size, stock]) => ({
+            product_id: productId!,
+            size,
+            stock,
+            updated_at: new Date().toISOString(),
+          }))
+        if (variants.length > 0) {
+          await supabase.from('product_variants').insert(variants)
+        }
+      }
+
       setEditProduct(null)
       setShowAddModal(false)
       refetch()
@@ -318,7 +344,7 @@ export default function InventoryPage() {
         product={editProduct}
         categories={categories}
         onClose={() => { setEditProduct(null); setShowAddModal(false) }}
-        onSave={handleSaveProduct}
+        onSave={(data, imageFile, sizeStocks) => handleSaveProduct(data, imageFile, sizeStocks)}
         saving={saving}
       />
     </div>
@@ -332,13 +358,12 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
   product: Product | null
   categories: { id: string; name: string }[]
   onClose: () => void
-  onSave: (data: Partial<Product>, imageFile: File | null) => Promise<string | null>
+  onSave: (data: Partial<Product>, imageFile: File | null, sizeStocks?: Record<string, number>) => Promise<string | null>
   saving: boolean
 }) {
   const [form, setForm] = useState({
     name: '',
     category_id: '',
-    size: '',
     sku: '',
     purchase_price: '',
     sale_price: '',
@@ -346,6 +371,7 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
     min_stock: '2',
     image_url: '',
   })
+  const [sizeStocks, setSizeStocks] = useState<Record<string, number>>({})
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState('')
   const [error, setError] = useState('')
@@ -360,7 +386,6 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
       setForm({
         name: product.name,
         category_id: product.category_id ?? '',
-        size: product.size ?? '',
         sku: product.sku ?? '',
         purchase_price: String(product.purchase_price),
         sale_price: String(product.sale_price),
@@ -369,13 +394,26 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
         image_url: product.image_url ?? '',
       })
       if (product.image_url) setImagePreview(product.image_url)
+      // Cargar variantes si existen, si no legacy single-size
+      if (product.variants && product.variants.length > 0) {
+        const stocks: Record<string, number> = {}
+        product.variants.forEach(v => { stocks[v.size] = v.stock })
+        setSizeStocks(stocks)
+      } else if (product.size && product.stock > 0) {
+        setSizeStocks({ [product.size]: product.stock })
+      } else {
+        setSizeStocks({})
+      }
     } else {
-      setForm({ name: '', category_id: '', size: '', sku: '', purchase_price: '', sale_price: '', stock: '0', min_stock: '2', image_url: '' })
+      setForm({ name: '', category_id: '', sku: '', purchase_price: '', sale_price: '', stock: '0', min_stock: '2', image_url: '' })
+      setSizeStocks({})
     }
   }, [product, open])
 
   const selectedCategory = categories.find(c => c.id === form.category_id)
   const isTextile = selectedCategory?.name === 'Textil'
+
+  const totalSizeStock = Object.values(sizeStocks).reduce((a, b) => a + b, 0)
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -388,7 +426,7 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
     const errs: Record<string, string> = {}
     if (!form.name.trim()) errs.name = 'El nombre es obligatorio'
     if (!form.sale_price || parseFloat(form.sale_price) < 0) errs.sale_price = 'Introduce el PVP'
-    if (form.stock === '' || parseInt(form.stock) < 0) errs.stock = 'Introduce la cantidad'
+    if (!isTextile && (form.stock === '' || parseInt(form.stock) < 0)) errs.stock = 'Introduce la cantidad'
     return errs
   }
 
@@ -398,17 +436,19 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
     const errs = validate()
     if (Object.keys(errs).length > 0) { setFieldErrors(errs); return }
     setFieldErrors({})
+
+    const stockValue = isTextile ? totalSizeStock : parseInt(form.stock)
+
     const err = await onSave({
       name: form.name.trim(),
       category_id: form.category_id || undefined,
-      size: isTextile && form.size ? form.size : undefined,
       sku: form.sku.trim() || undefined,
       purchase_price: parseFloat(form.purchase_price) || 0,
       sale_price: parseFloat(form.sale_price),
-      stock: parseInt(form.stock),
+      stock: stockValue,
       min_stock: parseInt(form.min_stock) || 2,
       image_url: form.image_url || undefined,
-    }, imageFile)
+    }, imageFile, isTextile ? sizeStocks : undefined)
     if (err) setError(err)
   }
 
@@ -458,7 +498,7 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
           <label className="text-sm font-medium text-zinc-300">Categoría</label>
           <select
             value={form.category_id}
-            onChange={e => setForm(f => ({ ...f, category_id: e.target.value, size: '' }))}
+            onChange={e => setForm(f => ({ ...f, category_id: e.target.value }))}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-white text-sm"
           >
             <option value="">Sin categoría</option>
@@ -468,26 +508,61 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
           </select>
         </div>
 
-        {/* Talla — solo si es Ropa */}
-        {isTextile && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-zinc-300">Talla</label>
-            <div className="flex flex-wrap gap-2">
-              {SIZES.map(s => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setForm(f => ({ ...f, size: f.size === s ? '' : s }))}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                    form.size === s
-                      ? 'bg-white border-white text-black'
-                      : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
-                  }`}
-                >
-                  {s}
-                </button>
+        {/* Stock por tallas — solo si es Textil */}
+        {isTextile ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-zinc-300">Stock por talla</label>
+              {totalSizeStock > 0 && (
+                <span className="text-xs text-zinc-500">Total: <span className="text-white font-bold">{totalSizeStock} uds</span></span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {SIZES.map(size => (
+                <div key={size} className="flex flex-col gap-1">
+                  <span className="text-xs font-semibold text-zinc-400 text-center">{size}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={sizeStocks[size] ?? 0}
+                    onChange={e => {
+                      const val = Math.max(0, parseInt(e.target.value) || 0)
+                      setSizeStocks(prev => ({ ...prev, [size]: val }))
+                    }}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-2 px-2 text-white text-sm text-center focus:outline-none focus:border-white"
+                  />
+                </div>
               ))}
             </div>
+            <Input
+              label="Stock mínimo (total)"
+              type="number"
+              min="0"
+              placeholder="2"
+              value={form.min_stock}
+              onChange={e => setForm(f => ({ ...f, min_stock: e.target.value }))}
+            />
+          </div>
+        ) : (
+          /* Stock normal para no textil */
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Cantidad *"
+              type="number"
+              min="0"
+              placeholder="0"
+              value={form.stock}
+              onChange={e => { setForm(f => ({ ...f, stock: e.target.value })); setFieldErrors(fe => ({ ...fe, stock: '' })) }}
+              error={fieldErrors.stock}
+            />
+            <Input
+              label="Stock mínimo"
+              type="number"
+              min="0"
+              placeholder="2"
+              value={form.min_stock}
+              onChange={e => setForm(f => ({ ...f, min_stock: e.target.value }))}
+            />
           </div>
         )}
 
@@ -511,27 +586,6 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
             value={form.sale_price}
             onChange={e => { setForm(f => ({ ...f, sale_price: e.target.value })); setFieldErrors(fe => ({ ...fe, sale_price: '' })) }}
             error={fieldErrors.sale_price}
-          />
-        </div>
-
-        {/* Stock */}
-        <div className="grid grid-cols-2 gap-3">
-          <Input
-            label="Cantidad *"
-            type="number"
-            min="0"
-            placeholder="0"
-            value={form.stock}
-            onChange={e => { setForm(f => ({ ...f, stock: e.target.value })); setFieldErrors(fe => ({ ...fe, stock: '' })) }}
-            error={fieldErrors.stock}
-          />
-          <Input
-            label="Stock mínimo"
-            type="number"
-            min="0"
-            placeholder="2"
-            value={form.min_stock}
-            onChange={e => setForm(f => ({ ...f, min_stock: e.target.value }))}
           />
         </div>
 
@@ -620,26 +674,53 @@ function SortableProductCard({ product, canReorder, onEdit, onToggleActive, onSt
             </div>
             {product.sku && <p className="text-xs text-zinc-600 mt-0.5">{product.sku}</p>}
             <p className="text-white font-bold text-sm mt-0.5">{formatCurrency(product.sale_price)}</p>
+            {/* Pills de talla */}
+            {product.variants && product.variants.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {product.variants.map(v => (
+                  <span
+                    key={v.size}
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                      v.stock === 0
+                        ? 'bg-red-950/60 text-red-500'
+                        : v.stock <= 2
+                          ? 'bg-amber-950/60 text-amber-400'
+                          : 'bg-zinc-800 text-zinc-300'
+                    }`}
+                  >
+                    {v.size} {v.stock}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Stock control */}
+          {/* Stock control — desactivado para textil (usar edición por talla) */}
           <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={onStockDown}
-              disabled={product.stock === 0}
-              className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center disabled:opacity-30 active:scale-95 transition-transform"
-            >
-              <Minus size={14} />
-            </button>
-            <span className={`w-8 text-center font-bold text-sm ${isOutOfStock ? 'text-red-400' : isLowStock ? 'text-amber-400' : 'text-white'}`}>
-              {product.stock}
-            </span>
-            <button
-              onClick={onStockUp}
-              className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center active:scale-95 transition-transform"
-            >
-              <Plus size={14} />
-            </button>
+            {product.variants && product.variants.length > 0 ? (
+              <span className={`text-xs font-bold px-2 ${isOutOfStock ? 'text-red-400' : isLowStock ? 'text-amber-400' : 'text-zinc-400'}`}>
+                {product.stock} uds
+              </span>
+            ) : (
+              <>
+                <button
+                  onClick={onStockDown}
+                  disabled={product.stock === 0}
+                  className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center disabled:opacity-30 active:scale-95 transition-transform"
+                >
+                  <Minus size={14} />
+                </button>
+                <span className={`w-8 text-center font-bold text-sm ${isOutOfStock ? 'text-red-400' : isLowStock ? 'text-amber-400' : 'text-white'}`}>
+                  {product.stock}
+                </span>
+                <button
+                  onClick={onStockUp}
+                  className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center active:scale-95 transition-transform"
+                >
+                  <Plus size={14} />
+                </button>
+              </>
+            )}
           </div>
         </div>
 
