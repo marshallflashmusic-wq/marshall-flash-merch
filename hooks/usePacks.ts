@@ -37,10 +37,9 @@ export function usePacks() {
   useEffect(() => {
     loadPacks()
     const supabase = createClient()
-    // Mismo canal que el emisor en useSales ('merch-sync')
     const channel = supabase
-      .channel('merch-sync')
-      .on('broadcast', { event: 'sale' }, () => loadPacks())
+      .channel('packs-products-changes')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, () => loadPacks())
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [loadPacks])

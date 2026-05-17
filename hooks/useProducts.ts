@@ -47,10 +47,9 @@ export function useProducts() {
   useEffect(() => {
     load()
     const supabase = createClient()
-    // Mismo canal que el emisor en useSales ('merch-sync')
     const channel = supabase
-      .channel('merch-sync')
-      .on('broadcast', { event: 'sale' }, () => load())
+      .channel('products-changes')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, () => load())
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [load])
@@ -91,8 +90,8 @@ export function useAllProducts() {
     load()
     const supabase = createClient()
     const channel = supabase
-      .channel('merch-sync')
-      .on('broadcast', { event: 'sale' }, () => load())
+      .channel('all-products-changes')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, () => load())
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [load])

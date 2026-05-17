@@ -119,20 +119,6 @@ export function useSales() {
 
       const { sale } = await res.json()
 
-      // Notificar a todos los dispositivos conectados para que refresquen el stock.
-      // IMPORTANTE: NO llamar removeChannel — createBrowserClient es un singleton
-      // y removeChannel destruiría el canal que useProducts/usePacks tienen suscrito.
-      try {
-        const { createClient } = await import('@/lib/supabase/client')
-        const supabase = createClient()
-        const ch = supabase.channel('merch-sync')
-        ch.subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            ch.send({ type: 'broadcast', event: 'sale', payload: {} })
-          }
-        })
-      } catch { /* no crítico */ }
-
       return { success: true, saleId: sale.id }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error desconocido'
