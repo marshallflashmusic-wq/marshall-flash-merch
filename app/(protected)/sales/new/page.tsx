@@ -167,7 +167,7 @@ export default function NewSalePage() {
               hint="Crea packs en Configuración → Packs"
             />
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-3">
               {packs.map(pack => (
                 <PackCard
                   key={pack.id}
@@ -305,7 +305,7 @@ function ProductCard({
   )
 }
 
-// ─── Tarjeta de pack (cuadrada, igual que producto) ───────────────────────
+// ─── Tarjeta de pack (horizontal, ancho completo) ────────────────────────
 
 function PackCard({
   pack, quantity, onAdd, onDecrease,
@@ -323,33 +323,19 @@ function PackCard({
   const savings = normalTotal > 0 ? normalTotal - pack.sale_price : 0
 
   return (
-    <div className={`relative flex flex-col bg-zinc-900 border rounded-2xl overflow-hidden transition-all ${
+    <div className={`relative flex bg-zinc-900 border rounded-2xl overflow-hidden transition-all ${
       quantity > 0 ? 'border-white shadow-lg shadow-white/10' : isOutOfStock ? 'border-zinc-800 opacity-40' : 'border-zinc-800'
     }`}>
-      {/* Collage cuadrado */}
+      {/* Collage cuadrado fijo */}
       <button
         onClick={onAdd}
         disabled={isOutOfStock || atMax}
-        className="relative w-full aspect-square bg-zinc-800 active:scale-95 transition-transform disabled:active:scale-100"
+        className="relative w-28 h-28 shrink-0 bg-zinc-800 active:scale-95 transition-transform disabled:active:scale-100"
       >
         <PackCollage items={pack.items ?? []} />
-
-        {quantity > 0 && (
-          <div className="absolute top-2 right-2 w-7 h-7 bg-white rounded-full flex items-center justify-center shadow-lg z-10">
-            <span className="text-black text-sm font-black">{quantity}</span>
-          </div>
-        )}
-
-        {savings > 0.01 && quantity === 0 && !isOutOfStock && (
-          <div className="absolute top-2 left-2 flex items-center gap-0.5 bg-green-500/90 backdrop-blur-sm rounded-lg px-1.5 py-0.5 z-10">
-            <Tag size={9} className="text-white" />
-            <span className="text-white text-[10px] font-black">-{formatCurrency(savings)}</span>
-          </div>
-        )}
-
         {isOutOfStock && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-10">
-            <span className="bg-red-500 text-white text-xs font-black px-3 py-1 rounded-full uppercase tracking-wide">
+            <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wide">
               AGOTADO
             </span>
           </div>
@@ -357,42 +343,57 @@ function PackCard({
       </button>
 
       {/* Info */}
-      <div className="p-2.5">
-        <p className="text-white text-base font-semibold leading-tight line-clamp-1">{pack.name}</p>
-        {pack.items && pack.items.length > 0 && (
-          <p className="text-zinc-500 text-sm mt-0.5 line-clamp-2">
-            {pack.items.map(i =>
-              `${i.quantity > 1 ? `${i.quantity}× ` : ''}${i.product?.name ?? '?'}`
-            ).join(' · ')}
-          </p>
-        )}
-        <div className="flex items-center justify-between mt-1.5">
-          {quantity > 0 ? (
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={onDecrease}
-                className="w-6 h-6 rounded-lg bg-zinc-800 flex items-center justify-center active:scale-90"
-              >
-                <Minus size={11} />
-              </button>
-              <button
-                onClick={onAdd}
-                disabled={atMax}
-                className="w-6 h-6 rounded-lg bg-white flex items-center justify-center active:scale-90 disabled:opacity-30"
-              >
-                <Plus size={11} className="text-black" strokeWidth={3} />
-              </button>
-            </div>
-          ) : <span />}
-          <p className="text-white font-black text-xl">{formatCurrency(pack.sale_price)}</p>
+      <button
+        onClick={onAdd}
+        disabled={isOutOfStock || atMax}
+        className="flex-1 min-w-0 p-3 flex flex-col justify-between text-left active:bg-white/5 transition-colors disabled:active:bg-transparent"
+      >
+        <div className="min-w-0">
+          <p className="text-white text-base font-bold leading-tight line-clamp-2">{pack.name}</p>
+          {pack.items && pack.items.length > 0 && (
+            <p className="text-zinc-500 text-xs mt-1 line-clamp-2 leading-relaxed">
+              {pack.items.map(i =>
+                `${i.quantity > 1 ? `${i.quantity}× ` : ''}${i.product?.name ?? '?'}`
+              ).join(' · ')}
+            </p>
+          )}
         </div>
 
-        {!isOutOfStock && (
-          <p className="text-zinc-600 text-[10px] mt-0.5">
-            {availableStock} disponible{availableStock !== 1 ? 's' : ''}
-          </p>
-        )}
-      </div>
+        <div className="flex items-center justify-between mt-2">
+          <div className="flex flex-col">
+            <span className="text-white font-black text-xl leading-none">{formatCurrency(pack.sale_price)}</span>
+            {savings > 0.01 && !isOutOfStock && (
+              <span className="text-green-400 text-[10px] font-bold mt-0.5">-{formatCurrency(savings)} vs. separado</span>
+            )}
+            {!isOutOfStock && (
+              <span className="text-zinc-600 text-[10px] mt-0.5">{availableStock} disponible{availableStock !== 1 ? 's' : ''}</span>
+            )}
+          </div>
+
+          {quantity > 0 ? (
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={e => { e.stopPropagation(); onDecrease() }}
+                className="w-8 h-8 rounded-xl bg-zinc-800 flex items-center justify-center active:scale-90"
+              >
+                <Minus size={13} />
+              </button>
+              <span className="text-white font-black text-base w-5 text-center">{quantity}</span>
+              <button
+                onClick={e => { e.stopPropagation(); onAdd() }}
+                disabled={atMax}
+                className="w-8 h-8 rounded-xl bg-white flex items-center justify-center active:scale-90 disabled:opacity-30"
+              >
+                <Plus size={13} className="text-black" strokeWidth={3} />
+              </button>
+            </div>
+          ) : (
+            <div className="w-8 h-8 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0">
+              <Plus size={15} className="text-white" strokeWidth={2.5} />
+            </div>
+          )}
+        </div>
+      </button>
     </div>
   )
 }
