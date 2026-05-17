@@ -10,25 +10,28 @@ export default function SessionProvider({ children }: { children: React.ReactNod
   const router = useRouter()
   const { setUser, setIsOnline, setPendingSyncCount, tpvSession, setTpvSession, setSaleMode } = useAppStore()
 
-  // Comprobar sesión TPV al montar y cada 15s: si el admin la revoca o expira → logout inmediato
+  // Comprobar sesión TPV cada 15s: si el admin la revoca o expira → logout inmediato.
+  // Dep: tpvSession?.id — se re-ejecuta cuando Zustand hidrata desde localStorage
+  // (evita el race condition donde el efecto corría antes de que el estado estuviera listo).
   useEffect(() => {
-    if (!tpvSession) return
+    if (!tpvSession?.id) return
+
+    const logout = () => {
+      setTpvSession(null)
+      setSaleMode(false)
+      window.location.href = '/login'  // redirección dura, bypasea el router de Next.js
+    }
 
     const checkSession = async () => {
       if (new Date(tpvSession.expiresAt) < new Date()) {
-        setTpvSession(null)
-        setSaleMode(false)
-        router.push('/login')
+        logout()
         return
       }
       try {
         const res = await fetch(`/api/tpv-sessions/check?id=${tpvSession.id}`)
+        if (!res.ok) return
         const { valid } = await res.json()
-        if (!valid) {
-          setTpvSession(null)
-          setSaleMode(false)
-          router.push('/login')
-        }
+        if (!valid) logout()
       } catch {
         // Sin conexión: mantener sesión hasta que vuelva internet
       }
@@ -37,7 +40,7 @@ export default function SessionProvider({ children }: { children: React.ReactNod
     checkSession()
     const interval = setInterval(checkSession, 15_000)
     return () => clearInterval(interval)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tpvSession?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const supabase = createClient()
