@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useAppStore } from '@/store/appStore'
-import { Zap, Lock, Mail, Eye, EyeOff, Music2, ChevronDown, Hash, User } from 'lucide-react'
+import { Zap, Lock, Mail, Eye, EyeOff, ChevronDown, Hash, User } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 
@@ -77,8 +77,9 @@ export default function LoginPage() {
 
         {/* Branding */}
         <div className="flex flex-col items-center mb-2">
-          <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-3 shadow-lg shadow-white/10">
-            <Music2 size={32} className="text-black" strokeWidth={2.5} />
+          <div className="w-20 h-20 rounded-2xl overflow-hidden mb-3 shadow-lg shadow-green-500/20">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/icons/icon-512.png" alt="MyMerch" className="w-full h-full object-cover" />
           </div>
           <h1 className="text-xl font-black text-white tracking-tight">MyMerch</h1>
           <p className="text-zinc-600 text-xs mt-0.5">Punto de venta</p>
