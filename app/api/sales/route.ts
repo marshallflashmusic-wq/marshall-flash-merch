@@ -47,10 +47,9 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = getServiceClient()
     const body = await request.json()
-    const { saleData, items, stockDecrements } = body
+    const { saleData, items, stockDecrements, idempotencyKey } = body
 
-    // user_id es requerido (NOT NULL + FK a profiles). Si viene null (modo TPV sin sesión),
-    // usamos el perfil admin como fallback para no romper la FK.
+    // Resolver user_id: si viene null (TPV sin sesión Supabase), usar admin como FK fallback
     let userId = saleData.user_id
     if (!userId) {
       const { data: adminProfile } = await supabase
@@ -62,40 +61,40 @@ export async function POST(request: NextRequest) {
       userId = adminProfile?.id ?? null
     }
 
-    const insertData = { ...saleData, user_id: userId, synced: true }
+    const resolvedSaleData = { ...saleData, user_id: userId, synced: true }
 
-    const { data: sale, error: saleError } = await supabase
-      .from('sales')
-      .insert(insertData)
-      .select()
-      .single()
+    // process_sale ejecuta TODO en una sola transacción PostgreSQL:
+    // valida stock (con row lock), crea venta, inserta items, decrementa stock,
+    // registra inventory_movements. Si algo falla → rollback automático completo.
+    const { data: result, error: rpcError } = await supabase.rpc('process_sale', {
+      p_sale_data:        resolvedSaleData,
+      p_items:            items ?? [],
+      p_stock_decrements: stockDecrements ?? [],
+      p_idempotency_key:  idempotencyKey ?? null,
+    })
 
-    if (saleError) {
-      console.error('[POST /api/sales] Error insertando venta:', saleError)
-      return NextResponse.json({ error: saleError.message }, { status: 500 })
-    }
+    if (rpcError) {
+      console.error('[POST /api/sales] process_sale error:', rpcError.message)
 
-    if (items && items.length > 0) {
-      const { error: itemsError } = await supabase
-        .from('sale_items')
-        .insert(items.map((i: Record<string, unknown>) => ({ ...i, sale_id: sale.id })))
-      if (itemsError) {
-        await supabase.from('sales').delete().eq('id', sale.id)
-        return NextResponse.json({ error: 'Error guardando los productos de la venta' }, { status: 500 })
+      // Mensajes de error amigables para los casos más comunes
+      const msg = rpcError.message ?? ''
+      if (msg.includes('STOCK_INSUFICIENTE')) {
+        return NextResponse.json(
+          { error: 'Stock insuficiente. Otro vendedor puede haber vendido el mismo artículo. Actualiza y vuelve a intentarlo.' },
+          { status: 409 }
+        )
       }
+      if (msg.includes('PRODUCTO_NO_ENCONTRADO')) {
+        return NextResponse.json(
+          { error: 'Uno de los productos ya no existe en el sistema.' },
+          { status: 409 }
+        )
+      }
+      return NextResponse.json({ error: rpcError.message }, { status: 500 })
     }
 
-    for (const dec of stockDecrements ?? []) {
-      await supabase.rpc('decrement_stock', {
-        p_product_id: dec.product_id,
-        p_quantity: dec.quantity,
-        p_sale_id: sale.id,
-        p_user_id: saleData.user_id,
-        p_movement_type: (dec as { movement_type?: string }).movement_type ?? 'sale',
-      })
-    }
-
-    return NextResponse.json({ sale })
+    const saleId = (result as { sale_id: string; duplicate: boolean })?.sale_id
+    return NextResponse.json({ sale: { id: saleId } })
   } catch (e) {
     console.error('[POST /api/sales] excepción no capturada:', e)
     return NextResponse.json(
@@ -118,7 +117,6 @@ export async function PATCH(request: NextRequest) {
 
   if (total_amount !== undefined) {
     updateData.total_amount = Number(total_amount)
-    // Recalcular beneficio: beneficio = importe cobrado - coste
     const { data: current } = await supabase
       .from('sales').select('total_cost').eq('id', id).single()
     if (current) updateData.profit = Number(total_amount) - (current.total_cost ?? 0)
@@ -172,7 +170,6 @@ export async function DELETE(request: NextRequest) {
         p_sale_id: id,
       })
       if (rpcError) {
-        // Fallback: actualización directa si la función RPC no existe
         const { data: prod } = await supabase
           .from('products').select('stock').eq('id', productId).single()
         if (prod) {

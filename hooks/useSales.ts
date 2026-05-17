@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { savePendingSale, getPendingSales, deleteSyncedSale } from '@/lib/offline/db'
 import { generateId } from '@/lib/utils'
 import { useAppStore } from '@/store/appStore'
@@ -7,6 +7,8 @@ import type { Sale, SaleFilters, CartItem, PaymentMethod, OfflineSale } from '@/
 
 export function useSales() {
   const [loading, setLoading] = useState(false)
+  // Previene doble envío: ref no causa re-render innecesario
+  const submittingRef = useRef(false)
   const { user, activeEvent, isOnline, setPendingSyncCount, tpvSession } = useAppStore()
 
   const createSale = useCallback(async (
@@ -15,10 +17,14 @@ export function useSales() {
     eventId: string | null,
     notes?: string
   ): Promise<{ success: boolean; saleId?: string; error?: string }> => {
+    // Protección doble envío: ignorar si ya hay una petición en vuelo
+    if (submittingRef.current) return { success: false, error: 'Venta en proceso, espera un momento.' }
+    submittingRef.current = true
     setLoading(true)
+
     try {
-      const total = items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0)
-      const cost  = items.reduce((acc, i) => acc + i.unit_cost  * i.quantity, 0)
+      const total  = items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0)
+      const cost   = items.reduce((acc, i) => acc + i.unit_cost  * i.quantity, 0)
       const profit = total - cost
 
       const saleItems = items.map(item => ({
@@ -62,8 +68,10 @@ export function useSales() {
       }
 
       if (!isOnline) {
+        // En offline el id del OfflineSale sirve como idempotency_key al sincronizar
+        const offlineId = generateId()
         const offlineSale: OfflineSale = {
-          id: generateId(),
+          id: offlineId,
           data: { ...saleData, synced: false },
           items: saleItems,
           stockDecrements,
@@ -73,13 +81,17 @@ export function useSales() {
         await savePendingSale(offlineSale)
         const pending = await getPendingSales()
         setPendingSyncCount(pending.length)
-        return { success: true, saleId: offlineSale.id }
+        return { success: true, saleId: offlineId }
       }
+
+      // Generar idempotency key único por intento de venta.
+      // Si hay pérdida de conexión y se reintenta, el servidor detecta el duplicado y devuelve la venta original.
+      const idempotencyKey = generateId()
 
       const res = await fetch('/api/sales', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ saleData, items: saleItems, stockDecrements }),
+        body: JSON.stringify({ saleData, items: saleItems, stockDecrements, idempotencyKey }),
       })
 
       const contentType = res.headers.get('content-type') ?? ''
@@ -88,41 +100,48 @@ export function useSales() {
       if (!res.ok) {
         const err = isJson ? await res.json().catch(() => ({})) : {}
         const msg = (err as Record<string, string>).error ?? `Error HTTP ${res.status}`
-        console.error('Error creando venta (API):', msg)
+        console.error('[useSales] Error creando venta:', msg)
         return { success: false, error: msg }
       }
 
       if (!isJson) {
-        console.error('Error creando venta: la API devolvió HTML en lugar de JSON (status', res.status, '). Revisa SUPABASE_SERVICE_ROLE_KEY y ejecuta fix-sales.sql en Supabase.')
-        return { success: false, error: 'Error del servidor. Verifica la configuración de Supabase (ejecuta fix-sales.sql).' }
+        console.error('[useSales] API devolvió HTML en lugar de JSON (status', res.status, ')')
+        return { success: false, error: 'Error del servidor. Verifica la configuración de Supabase.' }
       }
 
       const { sale } = await res.json()
       return { success: true, saleId: sale.id }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error desconocido'
-      console.error('Error creando venta:', msg)
+      console.error('[useSales] Excepción creando venta:', msg)
       return { success: false, error: msg }
     } finally {
       setLoading(false)
+      submittingRef.current = false
     }
-  }, [user, activeEvent, isOnline, setPendingSyncCount])
+  }, [user, activeEvent, isOnline, setPendingSyncCount, tpvSession])
 
   const syncPendingSales = useCallback(async () => {
     const pending = await getPendingSales()
     if (pending.length === 0) return
     for (const offlineSale of pending) {
       try {
+        // El id del OfflineSale actúa como idempotency_key:
+        // si esta venta ya fue sincronizada (respuesta perdida), el servidor la detecta y no duplica.
         const res = await fetch('/api/sales', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            saleData: { ...offlineSale.data, synced: true },
-            items: offlineSale.items,
+            saleData:        { ...offlineSale.data, synced: true },
+            items:           offlineSale.items,
             stockDecrements: offlineSale.stockDecrements ?? [],
+            idempotencyKey:  offlineSale.id,
           }),
         })
-        if (!res.ok) continue
+        if (!res.ok) {
+          console.warn('[useSales] Sync fallo para venta offline', offlineSale.id)
+          continue
+        }
         await deleteSyncedSale(offlineSale.id)
       } catch {
         // Mantener en pending; se reintentará en la próxima reconexión
@@ -157,7 +176,7 @@ export function useSalesHistory(filters: SaleFilters = {}) {
         setTotal(count ?? 0)
       }
     } catch (e) {
-      console.error('Error cargando historial:', e)
+      console.error('[useSales] Error cargando historial:', e)
     }
     setLoading(false)
   }, [filters.date_from, filters.date_to, filters.event_id, filters.user_id, filters.payment_method])
