@@ -120,7 +120,8 @@ export function useSales() {
       const { sale } = await res.json()
 
       // Notificar a todos los dispositivos conectados para que refresquen el stock.
-      // Hay que suscribirse al canal antes de poder emitir un broadcast.
+      // IMPORTANTE: NO llamar removeChannel — createBrowserClient es un singleton
+      // y removeChannel destruiría el canal que useProducts/usePacks tienen suscrito.
       try {
         const { createClient } = await import('@/lib/supabase/client')
         const supabase = createClient()
@@ -128,7 +129,6 @@ export function useSales() {
         ch.subscribe((status) => {
           if (status === 'SUBSCRIBED') {
             ch.send({ type: 'broadcast', event: 'sale', payload: {} })
-              .finally(() => setTimeout(() => supabase.removeChannel(ch), 2000))
           }
         })
       } catch { /* no crítico */ }
