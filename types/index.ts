@@ -175,6 +175,8 @@ export interface SaleFilters {
   event_id?: string
   user_id?: string
   payment_method?: PaymentMethod
+  amount_min?: number
+  amount_max?: number
 }
 
 export interface OfflineSale {

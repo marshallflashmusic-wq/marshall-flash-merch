@@ -31,12 +31,16 @@ export async function GET(request: NextRequest) {
   const event_id = searchParams.get('event_id')
   const user_id = searchParams.get('user_id')
   const payment_method = searchParams.get('payment_method')
+  const amount_min = searchParams.get('amount_min')
+  const amount_max = searchParams.get('amount_max')
 
   if (date_from) query = query.gte('created_at', date_from)
   if (date_to) query = query.lte('created_at', date_to + 'T23:59:59')
   if (event_id) query = query.eq('event_id', event_id)
   if (user_id) query = query.eq('user_id', user_id)
   if (payment_method) query = query.eq('payment_method', payment_method)
+  if (amount_min) query = query.gte('total_amount', parseFloat(amount_min))
+  if (amount_max) query = query.lte('total_amount', parseFloat(amount_max))
 
   const { data, count, error } = await query.limit(100)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

@@ -573,6 +573,33 @@ export default function SalesHistoryPage() {
             </select>
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm text-zinc-400">Precio mínimo (€)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0,00"
+                value={filters.amount_min ?? ''}
+                onChange={e => setFilters(f => ({ ...f, amount_min: e.target.value ? parseFloat(e.target.value) : undefined }))}
+                className="bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white text-sm focus:outline-none focus:border-white"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm text-zinc-400">Precio máximo (€)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Sin límite"
+                value={filters.amount_max ?? ''}
+                onChange={e => setFilters(f => ({ ...f, amount_max: e.target.value ? parseFloat(e.target.value) : undefined }))}
+                className="bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white text-sm focus:outline-none focus:border-white"
+              />
+            </div>
+          </div>
+
           <div className="flex gap-3 pt-2">
             <Button variant="outline" fullWidth onClick={() => { setFilters({}); setShowFilters(false) }}>
               Limpiar

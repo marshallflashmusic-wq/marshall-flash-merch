@@ -190,6 +190,8 @@ export function useSalesHistory(filters: SaleFilters = {}) {
     if (filters.event_id) params.set('event_id', filters.event_id)
     if (filters.user_id) params.set('user_id', filters.user_id)
     if (filters.payment_method) params.set('payment_method', filters.payment_method)
+    if (filters.amount_min != null) params.set('amount_min', String(filters.amount_min))
+    if (filters.amount_max != null) params.set('amount_max', String(filters.amount_max))
 
     try {
       const res = await fetch(`/api/sales?${params.toString()}`)
@@ -202,7 +204,7 @@ export function useSalesHistory(filters: SaleFilters = {}) {
       console.error('[useSales] Error cargando historial:', e)
     }
     setLoading(false)
-  }, [filters.date_from, filters.date_to, filters.event_id, filters.user_id, filters.payment_method])
+  }, [filters.date_from, filters.date_to, filters.event_id, filters.user_id, filters.payment_method, filters.amount_min, filters.amount_max])
 
   useEffect(() => { loadSales() }, [loadSales])
 
