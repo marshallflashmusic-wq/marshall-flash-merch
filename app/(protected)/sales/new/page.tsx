@@ -393,11 +393,15 @@ function PackCard({
         )}
       </button>
 
-      {/* Info */}
-      <button
-        onClick={onAdd}
-        disabled={isOutOfStock || atMax}
-        className="flex-1 min-w-0 p-3 flex flex-col justify-between text-left active:bg-white/5 transition-colors disabled:active:bg-transparent"
+      {/* Info — div con role button para evitar button-dentro-de-button */}
+      <div
+        role="button"
+        tabIndex={isOutOfStock || atMax ? -1 : 0}
+        onClick={!isOutOfStock && !atMax ? onAdd : undefined}
+        onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !isOutOfStock && !atMax) onAdd() }}
+        className={`flex-1 min-w-0 p-3 flex flex-col justify-between text-left transition-colors ${
+          isOutOfStock || atMax ? 'cursor-default' : 'active:bg-white/5 cursor-pointer'
+        }`}
       >
         <div className="min-w-0">
           <p className="text-white text-base font-bold leading-tight line-clamp-2">{pack.name}</p>
@@ -444,7 +448,7 @@ function PackCard({
             </div>
           )}
         </div>
-      </button>
+      </div>
     </div>
   )
 }
