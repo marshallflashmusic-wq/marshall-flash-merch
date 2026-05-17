@@ -7,6 +7,7 @@ import {
   Package2, LogOut, Wifi, WifiOff, RefreshCw, X, Tag,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { getDeviceId } from '@/lib/deviceId'
 import { useProducts } from '@/hooks/useProducts'
 import { usePacks } from '@/hooks/usePacks'
 import { useSales } from '@/hooks/useSales'
@@ -35,7 +36,7 @@ export default function NewSalePage() {
   const { packs, loading: loadingPacks, refetch: refetchPacks } = usePacks()
   const { createSale, loading: creating } = useSales()
   const cart = useCartStore()
-  const { isSaleMode, isOnline, pendingSyncCount, setSaleMode } = useAppStore()
+  const { isSaleMode, isOnline, pendingSyncCount, setSaleMode, tpvSession } = useAppStore()
 
   const [tab, setTab] = useState<'products' | 'packs'>('products')
   const [showCart, setShowCart] = useState(false)
@@ -100,6 +101,16 @@ export default function NewSalePage() {
   }
 
   const handleExitSaleMode = async () => {
+    // Liberar el PIN para que otro dispositivo pueda usarlo
+    if (tpvSession?.id) {
+      try {
+        await fetch('/api/tpv-sessions/release', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: tpvSession.id, deviceId: getDeviceId() }),
+        })
+      } catch { /* no crítico */ }
+    }
     const supabase = createClient()
     await supabase.auth.signOut()
     setSaleMode(false)
@@ -112,8 +123,22 @@ export default function NewSalePage() {
     <div className="h-full flex flex-col bg-[#0a0a0a]">
 
       {/* Header ultra compacto */}
-      <div className="flex items-center justify-end gap-2 px-3 py-2 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800 shrink-0">
-        <div className="flex items-center gap-1.5">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800 shrink-0">
+
+        {/* Nombre del vendedor con badge de staff */}
+        {isSaleMode && tpvSession?.sellerName ? (
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="bg-blue-600 text-white text-[10px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0">
+              STAFF
+            </span>
+            <span className="text-white text-sm font-semibold truncate">{tpvSession.sellerName}</span>
+          </div>
+        ) : (
+          <div />
+        )}
+
+        {/* Controles derecha */}
+        <div className="flex items-center gap-1.5 shrink-0">
           {pendingSyncCount > 0 && (
             <div className="flex items-center gap-1 bg-zinc-800 border border-zinc-700 rounded-full px-2 py-0.5">
               <RefreshCw size={10} className="text-white animate-spin" />
@@ -123,28 +148,28 @@ export default function NewSalePage() {
           <div className={isOnline ? 'text-green-500' : 'text-red-500'}>
             {isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
           </div>
+
+          {cartCount > 0 && (
+            <button
+              onClick={() => setShowCart(true)}
+              className="relative p-2 rounded-xl bg-white text-black tap-scale shrink-0"
+            >
+              <ShoppingCart size={18} strokeWidth={2.5} />
+              <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full text-white text-xs font-black flex items-center justify-center">
+                {cartCount}
+              </span>
+            </button>
+          )}
+
+          {isSaleMode && (
+            <button
+              onClick={handleExitSaleMode}
+              className="p-2 rounded-xl bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
+            >
+              <LogOut size={16} />
+            </button>
+          )}
         </div>
-
-        {cartCount > 0 && (
-          <button
-            onClick={() => setShowCart(true)}
-            className="relative p-2 rounded-xl bg-white text-black tap-scale shrink-0"
-          >
-            <ShoppingCart size={18} strokeWidth={2.5} />
-            <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full text-white text-xs font-black flex items-center justify-center">
-              {cartCount}
-            </span>
-          </button>
-        )}
-
-        {isSaleMode && (
-          <button
-            onClick={handleExitSaleMode}
-            className="p-2 rounded-xl bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
-          >
-            <LogOut size={16} />
-          </button>
-        )}
       </div>
 
       {/* ── Tabs deslizables ── */}

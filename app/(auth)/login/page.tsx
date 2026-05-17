@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useAppStore } from '@/store/appStore'
+import { getDeviceId } from '@/lib/deviceId'
 import { Zap, Lock, Mail, Eye, EyeOff, ChevronDown, Hash, User } from 'lucide-react'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
@@ -32,7 +33,7 @@ export default function LoginPage() {
       const res = await fetch('/api/tpv-sessions/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin, sellerName }),
+        body: JSON.stringify({ pin, sellerName, deviceId: getDeviceId() }),
       })
       const data = await res.json()
       if (!res.ok) {
