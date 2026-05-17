@@ -371,7 +371,6 @@ function TpvSessionsTab({ adminId }: { adminId: string | null }) {
           ))}
         </div>
         <Button fullWidth onClick={handleCreate} loading={creating}>
-          <Terminal size={16} />
           Generar PIN ({hours}h)
         </Button>
       </Card>

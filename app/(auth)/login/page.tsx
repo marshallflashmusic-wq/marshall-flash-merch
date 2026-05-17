@@ -73,7 +73,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-center p-5">
+    <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-start overflow-y-auto p-5 pt-10">
       <div className="w-full max-w-sm flex flex-col gap-5">
 
         {/* Branding */}
