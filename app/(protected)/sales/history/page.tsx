@@ -185,7 +185,7 @@ export default function SalesHistoryPage() {
 
       {/* Resumen */}
       {sales.length > 0 && (
-        <div className="grid grid-cols-3 gap-2 px-4 pt-4 shrink-0">
+        <div className={`grid gap-2 px-4 pt-4 shrink-0 ${isSaleMode ? 'grid-cols-2' : 'grid-cols-3'}`}>
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
             <p className="text-zinc-500 text-xs">Ventas</p>
             <p className="text-white font-black text-lg">{sales.length}</p>
@@ -194,10 +194,12 @@ export default function SalesHistoryPage() {
             <p className="text-zinc-500 text-xs">Ingresos</p>
             <p className="text-white font-black text-sm">{formatCurrency(totalRevenue)}</p>
           </div>
-          <div className={`border rounded-xl p-3 text-center ${totalProfit < 0 ? 'bg-red-950/30 border-red-900/50' : 'bg-zinc-900 border-zinc-800'}`}>
-            <p className="text-zinc-500 text-xs">Beneficio</p>
-            <p className={`font-black text-sm ${totalProfit < 0 ? 'text-red-400' : 'text-green-400'}`}>{formatCurrency(totalProfit)}</p>
-          </div>
+          {!isSaleMode && (
+            <div className={`border rounded-xl p-3 text-center ${totalProfit < 0 ? 'bg-red-950/30 border-red-900/50' : 'bg-zinc-900 border-zinc-800'}`}>
+              <p className="text-zinc-500 text-xs">Beneficio</p>
+              <p className={`font-black text-sm ${totalProfit < 0 ? 'text-red-400' : 'text-green-400'}`}>{formatCurrency(totalProfit)}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -266,9 +268,11 @@ export default function SalesHistoryPage() {
                     )}
                   </div>
                   <div className="text-right shrink-0">
-                    <p className={`text-sm font-bold ${sale.profit < 0 ? 'text-red-400' : 'text-green-400'}`}>
-                      {sale.profit < 0 ? '' : '+'}{formatCurrency(sale.profit)}
-                    </p>
+                    {!isSaleMode && (
+                      <p className={`text-sm font-bold ${sale.profit < 0 ? 'text-red-400' : 'text-green-400'}`}>
+                        {sale.profit < 0 ? '' : '+'}{formatCurrency(sale.profit)}
+                      </p>
+                    )}
                     <p className="text-zinc-600 text-xs">{paymentLabels[sale.payment_method]}</p>
                   </div>
                 </div>
@@ -301,15 +305,17 @@ export default function SalesHistoryPage() {
       <Modal open={!!selectedSale} onClose={() => setSelectedSale(null)} title="Detalle de venta" size="md">
         {selectedSale && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className={`grid gap-3 ${isSaleMode ? 'grid-cols-1' : 'grid-cols-2'}`}>
               <div className="bg-zinc-800 rounded-xl p-3">
                 <p className="text-zinc-500 text-xs">Total cobrado</p>
                 <p className="text-white font-black text-lg">{formatCurrency(selectedSale.total_amount)}</p>
               </div>
-              <div className={`rounded-xl p-3 ${selectedSale.profit < 0 ? 'bg-red-950/40' : 'bg-zinc-800'}`}>
-                <p className="text-zinc-500 text-xs">Beneficio</p>
-                <p className={`font-black text-lg ${selectedSale.profit < 0 ? 'text-red-400' : 'text-green-400'}`}>{formatCurrency(selectedSale.profit)}</p>
-              </div>
+              {!isSaleMode && (
+                <div className={`rounded-xl p-3 ${selectedSale.profit < 0 ? 'bg-red-950/40' : 'bg-zinc-800'}`}>
+                  <p className="text-zinc-500 text-xs">Beneficio</p>
+                  <p className={`font-black text-lg ${selectedSale.profit < 0 ? 'text-red-400' : 'text-green-400'}`}>{formatCurrency(selectedSale.profit)}</p>
+                </div>
+              )}
             </div>
             <div className="space-y-1 text-sm">
               <div className="flex justify-between py-1 border-b border-zinc-800">
