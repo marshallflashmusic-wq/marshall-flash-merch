@@ -8,8 +8,9 @@ interface Props {
 export default function PackCollage({ items }: Props) {
   const images = items
     .filter(i => i.product?.image_url)
-    .slice(0, 4)
     .map(i => i.product!.image_url!)
+
+  const extra = images.length - 1
 
   if (images.length === 0) {
     return (
@@ -19,44 +20,19 @@ export default function PackCollage({ items }: Props) {
     )
   }
 
-  if (images.length === 1) {
-    return (
+  return (
+    <div className="absolute inset-0">
       <img
         src={images[0]}
         alt=""
-        className="absolute inset-0 w-full h-full object-cover"
+        className="w-full h-full object-cover"
         onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
       />
-    )
-  }
-
-  if (images.length === 2) {
-    return (
-      <div className="absolute inset-0 grid grid-cols-2 gap-px bg-zinc-800">
-        {images.map((url, i) => (
-          <img
-            key={i}
-            src={url}
-            alt=""
-            className="w-full h-full object-cover"
-            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-          />
-        ))}
-      </div>
-    )
-  }
-
-  return (
-    <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-px bg-zinc-800">
-      {images.map((url, i) => (
-        <img
-          key={i}
-          src={url}
-          alt=""
-          className="w-full h-full object-cover"
-          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-        />
-      ))}
+      {extra > 0 && (
+        <div className="absolute bottom-1.5 right-1.5 bg-black/70 backdrop-blur-sm rounded-md px-1.5 py-0.5">
+          <span className="text-white text-[10px] font-bold">+{extra}</span>
+        </div>
+      )}
     </div>
   )
 }

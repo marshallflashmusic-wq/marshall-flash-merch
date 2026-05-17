@@ -80,8 +80,8 @@ export default function LoginPage() {
           <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-3 shadow-lg shadow-white/10">
             <Music2 size={32} className="text-black" strokeWidth={2.5} />
           </div>
-          <h1 className="text-xl font-black text-white tracking-tight">Marshall Flash</h1>
-          <p className="text-zinc-600 text-xs mt-0.5">Merch POS</p>
+          <h1 className="text-xl font-black text-white tracking-tight">MyMerch</h1>
+          <p className="text-zinc-600 text-xs mt-0.5">Punto de venta</p>
         </div>
 
         {/* MODO VENTA — con PIN */}
@@ -192,6 +192,8 @@ export default function LoginPage() {
         </div>
 
       </div>
+
+      <p className="text-zinc-700 text-[11px] mt-6">Powered by Marshall Flash</p>
     </div>
   )
 }

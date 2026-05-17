@@ -1,6 +1,6 @@
 {
-  "name": "Marshall Flash Merch",
-  "short_name": "MF Merch",
+  "name": "MyMerch",
+  "short_name": "MyMerch",
   "description": "Gestión de inventario y ventas de merchandising",
   "start_url": "/",
   "display": "standalone",
