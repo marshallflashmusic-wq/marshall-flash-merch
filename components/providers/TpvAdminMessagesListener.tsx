@@ -1,25 +1,18 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import Link from 'next/link'
-import { Bell, X, Check, CalendarDays } from 'lucide-react'
+import { Bell, X, Check } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useAppStore } from '@/store/appStore'
 
-interface HelpRequest {
+interface AdminMessage {
   id: string
-  seller_name: string
+  seller_name: string         // nombre del admin que envía
   message: string | null
-  event_id: string | null
-  status: 'pending' | 'resolved'
   from_role?: 'tpv' | 'admin'
-  target_session_id?: string | null
+  target_session_id: string | null
   created_at: string
-  event?: { id: string; name: string } | null
 }
 
-// AudioContext compartido; se inicializa en la primera interacción del usuario,
-// porque los navegadores móviles (iOS especialmente) bloquean reproducir
-// audio antes de un gesto.
 let sharedAudioCtx: AudioContext | null = null
 function ensureAudioCtx() {
   if (typeof window === 'undefined') return null
@@ -31,16 +24,16 @@ function ensureAudioCtx() {
   } catch { return null }
 }
 
-function playBeep() {
+function playPing() {
   const ctx = sharedAudioCtx ?? ensureAudioCtx()
   if (!ctx) return
   if (ctx.state === 'suspended') ctx.resume().catch(() => {})
   try {
     const o = ctx.createOscillator()
     const g = ctx.createGain()
-    o.type = 'sine'
-    o.frequency.setValueAtTime(880, ctx.currentTime)
-    o.frequency.setValueAtTime(660, ctx.currentTime + 0.18)
+    o.type = 'triangle'
+    o.frequency.setValueAtTime(660, ctx.currentTime)
+    o.frequency.setValueAtTime(880, ctx.currentTime + 0.12)
     g.gain.setValueAtTime(0.0001, ctx.currentTime)
     g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + 0.02)
     g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5)
@@ -50,13 +43,13 @@ function playBeep() {
   } catch { /* silencioso */ }
 }
 
-export default function HelpRequestsListener() {
-  const { user, isSaleMode } = useAppStore()
-  const isAdmin = !isSaleMode && user?.role === 'admin'
-  const [toasts, setToasts] = useState<HelpRequest[]>([])
+export default function TpvAdminMessagesListener() {
+  const { isSaleMode, tpvSession } = useAppStore()
+  const sessionId = tpvSession?.id ?? null
+  const [toasts, setToasts] = useState<AdminMessage[]>([])
   const seenIds = useRef<Set<string>>(new Set())
 
-  // Desbloquea audio en la primera interacción del usuario (requisito iOS/Safari).
+  // Desbloqueo de audio en la primera interacción.
   useEffect(() => {
     const unlock = () => {
       const ctx = ensureAudioCtx()
@@ -87,85 +80,76 @@ export default function HelpRequestsListener() {
     dismiss(id)
   }, [dismiss])
 
-  // Carga inicial: avisos pendientes existentes (solo from_role=tpv)
+  // Carga inicial: mensajes del admin pendientes para esta sesión TPV
   useEffect(() => {
-    if (!isAdmin) return
+    if (!isSaleMode || !sessionId) return
     let cancelled = false
-    fetch('/api/help-requests?status=pending&from_role=tpv').then(r => r.json()).then(j => {
-      if (cancelled) return
-      const reqs: HelpRequest[] = j.requests ?? []
-      if (reqs.length > 0) {
-        reqs.forEach(r => seenIds.current.add(r.id))
-        setToasts(reqs.slice(0, 5))
-      }
-    }).catch(() => {})
+    fetch(`/api/help-requests?status=pending&from_role=admin&for_session=${sessionId}`)
+      .then(r => r.json())
+      .then(j => {
+        if (cancelled) return
+        const reqs: AdminMessage[] = j.requests ?? []
+        if (reqs.length > 0) {
+          reqs.forEach(r => seenIds.current.add(r.id))
+          setToasts(reqs.slice(0, 5))
+        }
+      }).catch(() => {})
     return () => { cancelled = true }
-  }, [isAdmin])
+  }, [isSaleMode, sessionId])
 
-  // Realtime: nuevos inserts del TPV → admin
+  // Realtime: nuevos mensajes del admin → este TPV (o broadcast con target null)
   useEffect(() => {
-    if (!isAdmin) return
+    if (!isSaleMode || !sessionId) return
     const supabase = createClient()
     const channel = supabase
-      .channel('help_requests_admin_toast')
+      .channel('admin_to_tpv_' + sessionId)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'help_requests' },
         (payload) => {
-          const row = payload.new as HelpRequest
-          // Solo nos interesan avisos del TPV al admin (no los que envió el propio admin)
-          if (row.from_role === 'admin') return
+          const row = payload.new as AdminMessage
+          if (row.from_role !== 'admin') return
+          // Aceptar si va dirigido a esta sesión o es broadcast (target null)
+          if (row.target_session_id && row.target_session_id !== sessionId) return
           if (seenIds.current.has(row.id)) return
           seenIds.current.add(row.id)
           setToasts(prev => [row, ...prev].slice(0, 5))
-          playBeep()
-          if (navigator.vibrate) navigator.vibrate([180, 80, 180])
+          playPing()
+          if (navigator.vibrate) navigator.vibrate([120, 60, 120])
         }
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [isAdmin])
+  }, [isSaleMode, sessionId])
 
-  if (!isAdmin || toasts.length === 0) return null
+  if (!isSaleMode || toasts.length === 0) return null
 
   return (
     <div className="fixed top-4 left-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none">
       {toasts.map(t => (
         <div
           key={t.id}
-          className="pointer-events-auto bg-amber-500 text-black rounded-2xl shadow-2xl border-2 border-amber-300 px-3 py-3 flex items-start gap-3"
-          style={{ boxShadow: '0 10px 40px -5px rgba(245, 158, 11, 0.5)' }}
+          className="pointer-events-auto bg-blue-500 text-white rounded-2xl shadow-2xl border-2 border-blue-300 px-3 py-3 flex items-start gap-3"
+          style={{ boxShadow: '0 10px 40px -5px rgba(59, 130, 246, 0.5)' }}
         >
-          <div className="w-9 h-9 rounded-xl bg-black/15 flex items-center justify-center shrink-0">
+          <div className="w-9 h-9 rounded-xl bg-black/20 flex items-center justify-center shrink-0">
             <Bell size={18} strokeWidth={2.5} />
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-black text-sm leading-tight">
-              {t.seller_name} necesita ayuda
+              Aviso del admin
             </p>
-            <p className="text-xs leading-snug mt-0.5">
-              {t.message ?? 'Acude al puesto de merchan'}
+            <p className="text-sm leading-snug mt-0.5">
+              {t.message ?? '...'}
             </p>
-            {t.event && (
-              <div className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold bg-black/15 px-1.5 py-0.5 rounded-full">
-                <CalendarDays size={9} />{t.event.name}
-              </div>
-            )}
             <div className="flex gap-2 mt-2">
               <button
                 onClick={() => resolve(t.id)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-black/85 text-amber-300 text-xs font-bold active:scale-95 transition-transform"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-black/85 text-blue-200 text-xs font-bold active:scale-95 transition-transform"
               >
                 <Check size={12} strokeWidth={3} />
-                Atendido
+                Recibido
               </button>
-              <Link
-                href="/help-requests"
-                onClick={() => dismiss(t.id)}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-black/10 text-black text-xs font-semibold active:scale-95 transition-transform"
-              >
-                Ver todos
-              </Link>
             </div>
           </div>
           <button onClick={() => dismiss(t.id)} className="shrink-0 p-1 -mt-1 -mr-1">

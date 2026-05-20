@@ -25,7 +25,10 @@ export default function HelpRequestsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const url = filter === 'pending' ? '/api/help-requests?status=pending' : '/api/help-requests'
+      // Solo mostramos los avisos TPV → admin. Los mensajes admin → TPV viven
+      // como notificación efímera en el lado TPV.
+      const base = '/api/help-requests?from_role=tpv'
+      const url = filter === 'pending' ? `${base}&status=pending` : base
       const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) return
       const j = await res.json()

@@ -2,6 +2,7 @@
 import { Wifi, WifiOff, RefreshCw } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { cn } from '@/lib/utils'
+import AdminHelpBell from '@/components/layout/AdminHelpBell'
 
 interface TopBarProps {
   title: string
@@ -38,6 +39,8 @@ export default function TopBar({ title, subtitle, actions, back }: TopBarProps) 
             : <WifiOff size={14} />
           }
         </div>
+        {/* Campana de avisos TPV (solo se renderiza para admin) */}
+        <AdminHelpBell />
         {actions}
       </div>
     </header>
