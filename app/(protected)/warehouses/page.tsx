@@ -1,0 +1,578 @@
+'use client'
+import { useEffect, useState, useMemo, useCallback } from 'react'
+import {
+  Warehouse, Plus, Edit2, Trash2, Boxes, Package,
+  ChevronDown, X, AlertTriangle, Check,
+} from 'lucide-react'
+import TopBar from '@/components/layout/TopBar'
+import Card from '@/components/ui/Card'
+import Button from '@/components/ui/Button'
+import Modal from '@/components/ui/Modal'
+import Input from '@/components/ui/Input'
+
+interface Warehouse {
+  id: string
+  name: string
+  notes: string | null
+  sort_order: number
+  created_at: string
+}
+
+interface Product {
+  id: string
+  name: string
+  image_url: string | null
+  stock: number
+}
+
+interface Variant {
+  id: string
+  product_id: string
+  size: string
+  stock: number
+}
+
+interface StockRow {
+  warehouse_id: string
+  product_id: string
+  variant_id: string | null
+  quantity: number
+}
+
+const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Única']
+
+export default function WarehousesPage() {
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
+  const [products, setProducts]     = useState<Product[]>([])
+  const [variants, setVariants]     = useState<Variant[]>([])
+  const [stock, setStock]           = useState<StockRow[]>([])
+  const [loading, setLoading]       = useState(true)
+
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createName, setCreateName] = useState('')
+  const [createNotes, setCreateNotes] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [createErr, setCreateErr] = useState('')
+
+  const [unifyOpen, setUnifyOpen] = useState(false)
+  const [unifyName, setUnifyName] = useState('Almacén principal')
+  const [unifying, setUnifying] = useState(false)
+  const [unifyErr, setUnifyErr] = useState('')
+
+  const [editWh, setEditWh] = useState<Warehouse | null>(null)
+  const [editName, setEditName] = useState('')
+
+  const [assignWh, setAssignWh] = useState<Warehouse | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/warehouses/overview', { cache: 'no-store' })
+      if (!res.ok) return
+      const j = await res.json()
+      setWarehouses(j.warehouses ?? [])
+      setProducts(j.products ?? [])
+      setVariants(j.variants ?? [])
+      setStock(j.stock ?? [])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const stockByProduct = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const s of stock) {
+      map.set(s.product_id, (map.get(s.product_id) ?? 0) + s.quantity)
+    }
+    return map
+  }, [stock])
+
+  const totalGlobal = products.reduce((a, p) => a + p.stock, 0)
+  const totalUbicado = stock.reduce((a, s) => a + s.quantity, 0)
+  const totalSinUbicar = Math.max(0, totalGlobal - totalUbicado)
+
+  const handleCreate = async () => {
+    setCreateErr('')
+    if (!createName.trim()) { setCreateErr('Nombre obligatorio'); return }
+    setCreating(true)
+    try {
+      const res = await fetch('/api/warehouses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: createName.trim(), notes: createNotes.trim() || undefined }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Error')
+      setCreateName(''); setCreateNotes('')
+      setCreateOpen(false)
+      load()
+    } catch (e) {
+      setCreateErr(e instanceof Error ? e.message : 'Error')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleUnify = async () => {
+    setUnifyErr('')
+    if (!unifyName.trim()) { setUnifyErr('Nombre obligatorio'); return }
+    setUnifying(true)
+    try {
+      const res = await fetch('/api/warehouses/unify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: unifyName.trim() }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Error')
+      setUnifyOpen(false)
+      load()
+    } catch (e) {
+      setUnifyErr(e instanceof Error ? e.message : 'Error')
+    } finally {
+      setUnifying(false)
+    }
+  }
+
+  const handleDelete = async (wh: Warehouse) => {
+    if (!confirm(`¿Eliminar el almacén "${wh.name}"? El stock que estuviera allí pasará a "Sin ubicar".`)) return
+    await fetch(`/api/warehouses?id=${wh.id}`, { method: 'DELETE' })
+    load()
+  }
+
+  const handleEditSave = async () => {
+    if (!editWh || !editName.trim()) return
+    await fetch('/api/warehouses', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editWh.id, name: editName.trim() }),
+    })
+    setEditWh(null)
+    load()
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <TopBar
+        title="Almacenes"
+        subtitle={`${warehouses.length} almacén${warehouses.length !== 1 ? 'es' : ''}`}
+        actions={
+          <button onClick={() => setCreateOpen(true)} className="p-2 rounded-xl bg-white text-black">
+            <Plus size={18} strokeWidth={2.5} />
+          </button>
+        }
+      />
+
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {/* Resumen global */}
+        <Card padding="md">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div>
+              <p className="text-zinc-500 text-xs">Stock total</p>
+              <p className="text-white font-black text-lg">{totalGlobal}</p>
+            </div>
+            <div>
+              <p className="text-zinc-500 text-xs">Ubicado</p>
+              <p className="text-white font-black text-lg">{totalUbicado}</p>
+            </div>
+            <div>
+              <p className="text-zinc-500 text-xs">Sin ubicar</p>
+              <p className={`font-black text-lg ${totalSinUbicar > 0 ? 'text-amber-400' : 'text-zinc-500'}`}>
+                {totalSinUbicar}
+              </p>
+            </div>
+          </div>
+          {totalSinUbicar > 0 && (
+            <div className="flex items-start gap-2 mt-3 bg-amber-950/40 border border-amber-900/60 rounded-xl px-3 py-2">
+              <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-amber-300 text-xs">
+                Hay {totalSinUbicar} unidades sin asignar a ningún almacén. Pulsa &quot;Almacén único&quot; para consolidar todo en uno, o asigna manualmente.
+              </p>
+            </div>
+          )}
+        </Card>
+
+        {/* Acción Almacén único */}
+        <Card padding="md">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
+              <Boxes size={20} className="text-amber-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-bold text-sm">Almacén único</p>
+              <p className="text-zinc-500 text-xs mt-0.5">
+                Borra todos los almacenes existentes y crea uno solo con todo el stock. Útil para empezar de cero.
+              </p>
+              <Button
+                onClick={() => { setUnifyName(warehouses[0]?.name ?? 'Almacén principal'); setUnifyOpen(true) }}
+                variant="outline"
+                className="mt-3 border-amber-700 text-amber-400 hover:bg-amber-950/30"
+              >
+                <Boxes size={14} />
+                Consolidar todo
+              </Button>
+            </div>
+          </div>
+        </Card>
+
+        {/* Listado almacenes */}
+        {loading ? (
+          <div className="flex justify-center py-10">
+            <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : warehouses.length === 0 ? (
+          <div className="flex flex-col items-center py-12 text-zinc-600">
+            <Warehouse size={36} />
+            <p className="mt-3 text-sm">Sin almacenes creados</p>
+            <p className="text-xs mt-1 text-zinc-700">Pulsa + para crear el primero</p>
+          </div>
+        ) : (
+          warehouses.map(wh => {
+            const whStock = stock.filter(s => s.warehouse_id === wh.id)
+            const units = whStock.reduce((a, s) => a + s.quantity, 0)
+            const lines = whStock.length
+            return (
+              <Card key={wh.id} padding="none">
+                <div className="p-3 flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-zinc-800 flex items-center justify-center shrink-0">
+                    <Warehouse size={20} className="text-zinc-300" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white font-bold text-sm">{wh.name}</p>
+                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                      <span className="text-zinc-500 text-xs">{units} unidades</span>
+                      <span className="text-zinc-700 text-xs">·</span>
+                      <span className="text-zinc-500 text-xs">{lines} línea{lines !== 1 ? 's' : ''}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => { setEditWh(wh); setEditName(wh.name) }}
+                      className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white"
+                    >
+                      <Edit2 size={13} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(wh)}
+                      className="p-2 rounded-lg bg-red-950/40 text-red-400 hover:bg-red-950/70"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setAssignWh(wh)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-amber-400 hover:bg-amber-500/10 transition-colors border-t border-zinc-800"
+                >
+                  <Package size={13} />Asignar artículos
+                  <ChevronDown size={12} className="-rotate-90" />
+                </button>
+              </Card>
+            )
+          })
+        )}
+      </div>
+
+      {/* Modal crear almacén */}
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nuevo almacén" size="md">
+        <div className="space-y-4">
+          <Input
+            label="Nombre *"
+            value={createName}
+            onChange={e => setCreateName(e.target.value)}
+            placeholder="Ej: Local ensayo, Casa Juan, Oficina..."
+            autoFocus
+          />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-zinc-300">Notas</label>
+            <textarea
+              value={createNotes}
+              onChange={e => setCreateNotes(e.target.value)}
+              rows={2}
+              placeholder="Dirección, contacto..."
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white placeholder:text-zinc-600 focus:outline-none focus:border-white resize-none text-sm"
+            />
+          </div>
+          {createErr && (
+            <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2">
+              <p className="text-red-400 text-sm">{createErr}</p>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button variant="outline" fullWidth onClick={() => setCreateOpen(false)}>Cancelar</Button>
+            <Button fullWidth loading={creating} onClick={handleCreate}>Crear</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal almacén único */}
+      <Modal open={unifyOpen} onClose={() => !unifying && setUnifyOpen(false)} title="Almacén único" size="md">
+        <div className="space-y-4">
+          <div className="bg-amber-950/40 border border-amber-900/60 rounded-xl px-3 py-2 flex items-start gap-2">
+            <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+            <p className="text-amber-300 text-xs">
+              Esto elimina todos los almacenes existentes y consolida todo el stock en uno solo. El stock global de cada artículo no cambia, solo se traslada físicamente.
+            </p>
+          </div>
+          <Input
+            label="Nombre del almacén"
+            value={unifyName}
+            onChange={e => setUnifyName(e.target.value)}
+            placeholder="Ej: Almacén principal"
+          />
+          {unifyErr && (
+            <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2">
+              <p className="text-red-400 text-sm">{unifyErr}</p>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button variant="outline" fullWidth onClick={() => setUnifyOpen(false)} disabled={unifying}>Cancelar</Button>
+            <Button fullWidth loading={unifying} onClick={handleUnify} className="bg-amber-500 hover:bg-amber-400 text-black">
+              <Boxes size={14} />Consolidar
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal editar almacén */}
+      <Modal open={!!editWh} onClose={() => setEditWh(null)} title="Editar almacén" size="sm">
+        <div className="space-y-4">
+          <Input
+            label="Nombre"
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <Button variant="outline" fullWidth onClick={() => setEditWh(null)}>Cancelar</Button>
+            <Button fullWidth onClick={handleEditSave}>Guardar</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal asignar artículos */}
+      {assignWh && (
+        <AssignStockModal
+          warehouse={assignWh}
+          products={products}
+          variants={variants}
+          stock={stock}
+          onClose={() => setAssignWh(null)}
+          onSaved={() => { load() }}
+        />
+      )}
+    </div>
+  )
+}
+
+function AssignStockModal({ warehouse, products, variants, stock, onClose, onSaved }: {
+  warehouse: Warehouse
+  products: Product[]
+  variants: Variant[]
+  stock: StockRow[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  // Estado local: cantidad asignada en este almacén por (product_id, variant_id|null)
+  const [draft, setDraft] = useState<Record<string, number>>(() => {
+    const m: Record<string, number> = {}
+    for (const s of stock) {
+      if (s.warehouse_id !== warehouse.id) continue
+      const key = `${s.product_id}::${s.variant_id ?? ''}`
+      m[key] = s.quantity
+    }
+    return m
+  })
+  const [saving, setSaving] = useState(false)
+  const [saveErr, setSaveErr] = useState('')
+  const [search, setSearch] = useState('')
+
+  // Para mostrar "máximo aquí" hay que conocer la suma en OTROS almacenes
+  const otherSumByKey = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const s of stock) {
+      if (s.warehouse_id === warehouse.id) continue
+      const key = `${s.product_id}::${s.variant_id ?? ''}`
+      m.set(key, (m.get(key) ?? 0) + s.quantity)
+    }
+    return m
+  }, [stock, warehouse.id])
+
+  const variantsByProduct = useMemo(() => {
+    const m = new Map<string, Variant[]>()
+    for (const v of variants) {
+      const list = m.get(v.product_id) ?? []
+      list.push(v)
+      m.set(v.product_id, list)
+    }
+    return m
+  }, [variants])
+
+  const filtered = products.filter(p =>
+    !search || p.name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const setQty = (productId: string, variantId: string | null, value: number) => {
+    const key = `${productId}::${variantId ?? ''}`
+    setDraft(prev => ({ ...prev, [key]: Math.max(0, value | 0) }))
+  }
+
+  const maxFor = (productId: string, variantId: string | null) => {
+    const key = `${productId}::${variantId ?? ''}`
+    const others = otherSumByKey.get(key) ?? 0
+    let available: number
+    if (variantId) {
+      available = variants.find(v => v.id === variantId)?.stock ?? 0
+    } else {
+      available = products.find(p => p.id === productId)?.stock ?? 0
+    }
+    return Math.max(0, available - others)
+  }
+
+  const handleSave = async () => {
+    setSaveErr('')
+    setSaving(true)
+    try {
+      // Identifica filas que han cambiado
+      const initial: Record<string, number> = {}
+      for (const s of stock) {
+        if (s.warehouse_id !== warehouse.id) continue
+        initial[`${s.product_id}::${s.variant_id ?? ''}`] = s.quantity
+      }
+      const changes: { product_id: string; variant_id: string | null; quantity: number }[] = []
+      // draft contiene tanto los que cambiaron como nuevos; mira los actuales
+      for (const key of Object.keys(draft)) {
+        if ((initial[key] ?? 0) !== draft[key]) {
+          const [pid, vid] = key.split('::')
+          changes.push({ product_id: pid, variant_id: vid || null, quantity: draft[key] })
+        }
+      }
+      // También los que estaban en initial pero ya no en draft → 0
+      for (const key of Object.keys(initial)) {
+        if (!(key in draft) && initial[key] > 0) {
+          const [pid, vid] = key.split('::')
+          changes.push({ product_id: pid, variant_id: vid || null, quantity: 0 })
+        }
+      }
+
+      for (const ch of changes) {
+        const res = await fetch(`/api/warehouses/${warehouse.id}/stock`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(ch),
+        })
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}))
+          throw new Error((j as { error?: string }).error ?? 'Error al guardar')
+        }
+      }
+      onSaved()
+      onClose()
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : 'Error de red')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Asignar a ${warehouse.name}`} size="lg">
+      <div className="space-y-3">
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Buscar artículo..."
+          className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white placeholder:text-zinc-600 focus:outline-none focus:border-white text-sm"
+        />
+
+        <p className="text-xs text-zinc-500">
+          La cantidad asignada no puede superar lo disponible (lo que queda en otros almacenes).
+        </p>
+
+        <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+          {filtered.length === 0 && (
+            <p className="text-zinc-600 text-sm text-center py-6">Sin resultados</p>
+          )}
+          {filtered.map(p => {
+            const pVariants = (variantsByProduct.get(p.id) ?? [])
+              .slice()
+              .sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size))
+            const hasVariants = pVariants.length > 0
+
+            return (
+              <div key={p.id} className="bg-zinc-800/50 border border-zinc-800 rounded-xl p-2.5">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-9 h-9 rounded-lg bg-zinc-800 overflow-hidden shrink-0">
+                    {p.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                    ) : <div className="w-full h-full flex items-center justify-center"><Package size={14} className="text-zinc-600" /></div>}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm font-semibold truncate">{p.name}</p>
+                    <p className="text-zinc-500 text-[11px]">Stock total: {p.stock}</p>
+                  </div>
+                </div>
+
+                {hasVariants ? (
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {pVariants.map(v => {
+                      const key = `${p.id}::${v.id}`
+                      const here = draft[key] ?? 0
+                      const max = maxFor(p.id, v.id)
+                      return (
+                        <div key={v.id} className="bg-zinc-900 rounded-lg p-1.5">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-zinc-300 font-bold">{v.size}</span>
+                            <span className="text-zinc-600">/{max}</span>
+                          </div>
+                          <input
+                            type="number"
+                            min={0}
+                            max={max}
+                            value={here}
+                            onChange={e => setQty(p.id, v.id, parseInt(e.target.value) || 0)}
+                            className="w-full bg-zinc-800 border border-zinc-700 rounded-md py-1 px-1.5 text-white text-sm text-center mt-1 focus:outline-none focus:border-white"
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-500 text-xs">Cantidad aquí:</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={maxFor(p.id, null)}
+                      value={draft[`${p.id}::`] ?? 0}
+                      onChange={e => setQty(p.id, null, parseInt(e.target.value) || 0)}
+                      className="flex-1 bg-zinc-800 border border-zinc-700 rounded-md py-1.5 px-2 text-white text-sm focus:outline-none focus:border-white"
+                    />
+                    <span className="text-zinc-600 text-xs shrink-0">máx {maxFor(p.id, null)}</span>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {saveErr && (
+          <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2">
+            <p className="text-red-400 text-sm">{saveErr}</p>
+          </div>
+        )}
+
+        <div className="flex gap-2 pt-1">
+          <Button variant="outline" fullWidth onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button fullWidth onClick={handleSave} loading={saving}>
+            <Check size={14} />Guardar
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}

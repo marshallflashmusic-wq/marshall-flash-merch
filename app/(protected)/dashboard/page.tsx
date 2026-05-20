@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import {
   ShoppingBag, Package, AlertTriangle,
   Banknote, CreditCard, Smartphone, Wallet, LogOut,
+  Warehouse,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useAppStore } from '@/store/appStore'
@@ -229,17 +230,23 @@ export default function DashboardPage() {
         {/* Acceso rápido */}
         <div>
           <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Acceso rápido</h2>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <Card interactive onClick={() => router.push('/sales/new')} padding="md" className="bg-white/5 border-white/20">
               <div className="flex flex-col items-center gap-2 py-2">
-                <ShoppingBag size={28} className="text-white" />
-                <span className="text-sm font-bold text-white">Nueva Venta</span>
+                <ShoppingBag size={26} className="text-white" />
+                <span className="text-xs font-bold text-white text-center leading-tight">Nueva Venta</span>
               </div>
             </Card>
             <Card interactive onClick={() => router.push('/inventory')} padding="md">
               <div className="flex flex-col items-center gap-2 py-2">
-                <Package size={28} className="text-zinc-400" />
-                <span className="text-sm font-bold text-zinc-300">Inventario</span>
+                <Package size={26} className="text-zinc-400" />
+                <span className="text-xs font-bold text-zinc-300 text-center leading-tight">Inventario</span>
+              </div>
+            </Card>
+            <Card interactive onClick={() => router.push('/warehouses')} padding="md">
+              <div className="flex flex-col items-center gap-2 py-2">
+                <Warehouse size={26} className="text-zinc-400" />
+                <span className="text-xs font-bold text-zinc-300 text-center leading-tight">Almacenes</span>
               </div>
             </Card>
           </div>

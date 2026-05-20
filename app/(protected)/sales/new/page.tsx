@@ -336,6 +336,7 @@ export default function NewSalePage() {
                       product={product}
                       quantity={productQty(product.id)}
                       hasVariants={isTextile}
+                      showStockAlways={isEventMode}
                       onAdd={() => {
                         if (isTextile) setSizePickerProduct(product)
                         else cart.addProduct(product)
@@ -461,11 +462,12 @@ export default function NewSalePage() {
 // ─── Tarjeta de producto ────────────────────────────────────────────────────
 
 function ProductCard({
-  product, quantity, hasVariants, onAdd, onDecrease,
+  product, quantity, hasVariants, showStockAlways, onAdd, onDecrease,
 }: {
   product: Product
   quantity: number
   hasVariants: boolean
+  showStockAlways?: boolean
   onAdd: () => void
   onDecrease: () => void
 }) {
@@ -496,7 +498,8 @@ function ProductCard({
           </div>
         )}
 
-        {isLowStock && (
+        {/* Badge superior izq: stock bajo (siempre) o stock total (solo en modo concierto) */}
+        {isLowStock ? (
           <div className="absolute top-2 left-2 z-10 flex flex-col items-start gap-0.5">
             <span className="bg-orange-500 text-white text-[10px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-md leading-none shadow-lg shadow-orange-500/40">
               Stock bajo
@@ -505,7 +508,13 @@ function ProductCard({
               {product.stock} ud{product.stock !== 1 ? 's' : ''}
             </span>
           </div>
-        )}
+        ) : showStockAlways && !isOutOfStock ? (
+          <div className="absolute top-2 left-2 z-10">
+            <span className="bg-black/75 text-white text-[10px] font-black px-1.5 py-0.5 rounded-md leading-none shadow-lg backdrop-blur-sm">
+              {product.stock} ud{product.stock !== 1 ? 's' : ''}
+            </span>
+          </div>
+        ) : null}
       </button>
 
       <div className="p-2.5">
