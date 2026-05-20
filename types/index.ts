@@ -67,6 +67,8 @@ export interface PackItem {
   individual_pack_price?: number | null
 }
 
+export type EventStatus = 'upcoming' | 'active' | 'closed' | 'cancelled'
+
 export interface Event {
   id: string
   name: string
@@ -75,8 +77,31 @@ export interface Event {
   date: string
   notes?: string
   active: boolean
+  status: EventStatus
+  closed_at?: string | null
   created_at: string
 }
+
+export interface EventInventoryItem {
+  id: string
+  event_id: string
+  product_id: string
+  variant_id?: string | null
+  quantity_assigned: number
+  quantity_sold: number
+  quantity_remaining: number
+  product_name?: string
+  product_image?: string | null
+  product_sale_price?: number
+  product_purchase_price?: number
+  variant_size?: string | null
+  variant_global_stock?: number | null
+  product_global_stock?: number
+  product?: Product
+  variant?: ProductVariant
+}
+
+export type TpvFlow = 'event' | 'quick' | null
 
 export type PaymentMethod = 'efectivo' | 'bizum' | 'tarjeta' | 'paypal' | 'mixto'
 
@@ -183,7 +208,13 @@ export interface OfflineSale {
   id: string
   data: Omit<Sale, 'id' | 'created_at'>
   items: Omit<SaleItem, 'id' | 'sale_id'>[]
-  stockDecrements: { product_id: string; quantity: number; movement_type?: string }[]
+  stockDecrements: {
+    product_id: string
+    quantity: number
+    movement_type?: string
+    variant_id?: string
+    event_inventory_id?: string
+  }[]
   created_at: string
   pending_sync: boolean
 }

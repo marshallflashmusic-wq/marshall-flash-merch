@@ -1,6 +1,5 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { cacheEvents, getCachedEvents } from '@/lib/offline/db'
 import type { Event } from '@/types'
 
@@ -8,7 +7,7 @@ export function useEvents() {
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
 
-  const fetch = useCallback(async () => {
+  const fetch_ = useCallback(async () => {
     try {
       if (!navigator.onLine) {
         const cached = await getCachedEvents()
@@ -16,11 +15,9 @@ export function useEvents() {
         setLoading(false)
         return
       }
-      const supabase = createClient()
-      const { data } = await supabase
-        .from('events')
-        .select('*')
-        .order('date', { ascending: false })
+      const res = await fetch('/api/events', { cache: 'no-store' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const { events: data } = await res.json()
       setEvents(data ?? [])
       if (data) cacheEvents(data).catch(() => {})
     } catch {
@@ -31,7 +28,7 @@ export function useEvents() {
     }
   }, [])
 
-  useEffect(() => { fetch() }, [fetch])
+  useEffect(() => { fetch_() }, [fetch_])
 
-  return { events, loading, refetch: fetch }
+  return { events, loading, refetch: fetch_ }
 }

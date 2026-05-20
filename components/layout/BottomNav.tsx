@@ -7,13 +7,15 @@ import {
   ShoppingCart,
   Clock,
   Settings,
+  CalendarDays,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store/appStore'
 
 const adminNav = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Inicio' },
-  { href: '/inventory', icon: Package, label: 'Stock' },
+  { href: '/events', icon: CalendarDays, label: 'Eventos' },
+  { href: '/inventory', icon: Package, label: 'Stock global' },
   { href: '/sales/new', icon: ShoppingCart, label: 'Vender', primary: true },
   { href: '/sales/history', icon: Clock, label: 'Ventas' },
   { href: '/settings', icon: Settings, label: 'Config' },

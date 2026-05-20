@@ -15,7 +15,8 @@ export function useSales() {
     items: CartItem[],
     paymentMethod: PaymentMethod,
     eventId: string | null,
-    notes?: string
+    notes?: string,
+    options?: { eventInventoryResolver?: (productId: string, variantId: string | null) => string | undefined }
   ): Promise<{ success: boolean; saleId?: string; error?: string }> => {
     // Protección doble envío: ignorar si ya hay una petición en vuelo
     if (submittingRef.current) return { success: false, error: 'Venta en proceso, espera un momento.' }
@@ -37,24 +38,35 @@ export function useSales() {
         profit:     (item.unit_price - item.unit_cost) * item.quantity,
       }))
 
-      const stockDecrements: { product_id: string; quantity: number; movement_type: string; variant_id?: string }[] = []
+      const resolver = options?.eventInventoryResolver
+      const stockDecrements: {
+        product_id: string
+        quantity: number
+        movement_type: string
+        variant_id?: string
+        event_inventory_id?: string
+      }[] = []
       for (const item of items) {
         if (item.type === 'product' && item.product) {
+          const einvId = resolver?.(item.product.id, item.variant_id ?? null)
           stockDecrements.push({
             product_id: item.product.id,
             quantity: item.quantity,
             movement_type: 'sale',
             variant_id: item.variant_id,
+            event_inventory_id: einvId,
           })
         } else if (item.type === 'pack' && item.pack?.items) {
           for (const packItem of item.pack.items) {
-            // Buscar si hay selección de talla para este producto del pack
             const sizeSelection = item.packSizeSelections?.find(s => s.product_id === packItem.product_id)
+            const variantId = sizeSelection?.variant_id
+            const einvId = resolver?.(packItem.product_id, variantId ?? null)
             stockDecrements.push({
               product_id: packItem.product_id,
               quantity: packItem.quantity * item.quantity,
               movement_type: 'pack_sale',
-              variant_id: sizeSelection?.variant_id,
+              variant_id: variantId,
+              event_inventory_id: einvId,
             })
           }
         }

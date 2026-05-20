@@ -1,24 +1,29 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ShoppingCart, Plus, Minus, Trash2, Package, Check,
   Banknote, CreditCard, Smartphone, Wallet, ChevronRight,
-  Package2, LogOut, Wifi, WifiOff, RefreshCw, X, Tag,
+  Package2, LogOut, Wifi, WifiOff, RefreshCw, X,
+  Zap, CalendarDays, MapPin, Building2, RotateCcw, ChevronLeft,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { getDeviceId } from '@/lib/deviceId'
 import { useProducts } from '@/hooks/useProducts'
 import { usePacks } from '@/hooks/usePacks'
 import { useSales } from '@/hooks/useSales'
+import { useEvents } from '@/hooks/useEvents'
+import { useEventTpvCatalog } from '@/hooks/useEventTpvCatalog'
 import { useCartStore } from '@/store/cartStore'
 import { useAppStore } from '@/store/appStore'
 import { formatCurrency } from '@/lib/utils'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import Card from '@/components/ui/Card'
 import PackCollage from '@/components/ui/PackCollage'
 import SwipeableTabs from '@/components/ui/SwipeableTabs'
-import type { PaymentMethod, Product, Pack, ProductVariant, PackSizeSelection } from '@/types'
+import { formatDate } from '@/lib/utils'
+import type { PaymentMethod, Product, Pack, ProductVariant, PackSizeSelection, Event } from '@/types'
 
 const SIZES_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Única']
 
@@ -32,11 +37,30 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: React.Elemen
 
 export default function NewSalePage() {
   const router = useRouter()
-  const { products, loading: loadingProducts, refetch: refetchProducts, patchStocks } = useProducts()
-  const { packs, loading: loadingPacks, refetch: refetchPacks } = usePacks()
+  const globalProducts = useProducts()
+  const globalPacks = usePacks()
   const { createSale, loading: creating } = useSales()
   const cart = useCartStore()
-  const { isSaleMode, isOnline, pendingSyncCount, setSaleMode, tpvSession } = useAppStore()
+  const {
+    isSaleMode, isOnline, pendingSyncCount, setSaleMode, tpvSession,
+    tpvFlow, setTpvFlow, activeEvent, setActiveEvent,
+  } = useAppStore()
+
+  const isEventMode = tpvFlow === 'event' && !!activeEvent
+  const eventCatalog = useEventTpvCatalog(isEventMode ? activeEvent!.id : null)
+
+  // Catálogo efectivo según modo
+  const products = isEventMode ? eventCatalog.products : globalProducts.products
+  const packs = isEventMode ? eventCatalog.packs : globalPacks.packs
+  const loadingProducts = isEventMode ? eventCatalog.loading : globalProducts.loading
+  const loadingPacks = isEventMode ? eventCatalog.loading : globalPacks.loading
+
+  const refetchProducts = () => { isEventMode ? eventCatalog.refetch() : globalProducts.refetch() }
+  const refetchPacks    = () => { isEventMode ? eventCatalog.refetch() : globalPacks.refetch() }
+  const patchStocks = (decrements: { product_id: string; variant_id?: string; qty: number }[]) => {
+    if (isEventMode) eventCatalog.patchStocks(decrements)
+    else globalProducts.patchStocks(decrements.map(d => ({ product_id: d.product_id, qty: d.qty })))
+  }
 
   const [tab, setTab] = useState<'products' | 'packs'>('products')
   const [showCart, setShowCart] = useState(false)
@@ -57,31 +81,33 @@ export default function NewSalePage() {
     cart.items.filter(i => i.type === 'pack' && i.pack?.id === packId)
       .reduce((sum, i) => sum + i.quantity, 0)
 
-  const refetchAll = useCallback(() => {
-    refetchProducts()
-    refetchPacks()
-  }, [refetchProducts, refetchPacks])
-
-
   const handleConfirmSale = async () => {
     if (cart.items.length === 0) return
     setSaleError('')
 
-    // Capturar los ítems antes de limpiar el carrito
     const soldItems = cart.items
 
-    const result = await createSale(soldItems, cart.paymentMethod, null, saleNotes || undefined)
+    const eventIdToSend = isEventMode ? activeEvent!.id : null
+    const result = await createSale(soldItems, cart.paymentMethod, eventIdToSend, saleNotes || undefined, {
+      eventInventoryResolver: isEventMode
+        ? (productId, variantId) => eventCatalog.getEventInventoryId(productId, variantId)
+        : undefined,
+    })
     if (result.success) {
-      // Actualización optimista: reflejar el stock vendido al instante, sin esperar red
+      // Actualización optimista
       const decrements = soldItems.flatMap(item => {
         if (item.type === 'product' && item.product) {
-          return [{ product_id: item.product.id, qty: item.quantity }]
+          return [{ product_id: item.product.id, variant_id: item.variant_id, qty: item.quantity }]
         }
         if (item.type === 'pack' && item.pack?.items) {
-          return item.pack.items.map(pi => ({
-            product_id: pi.product_id,
-            qty: pi.quantity * item.quantity,
-          }))
+          return item.pack.items.map(pi => {
+            const sizeSel = item.packSizeSelections?.find(s => s.product_id === pi.product_id)
+            return {
+              product_id: pi.product_id,
+              variant_id: sizeSel?.variant_id,
+              qty: pi.quantity * item.quantity,
+            }
+          })
         }
         return []
       })
@@ -101,7 +127,6 @@ export default function NewSalePage() {
   }
 
   const handleExitSaleMode = async () => {
-    // Liberar el PIN para que otro dispositivo pueda usarlo
     if (tpvSession?.id) {
       try {
         await fetch('/api/tpv-sessions/release', {
@@ -114,10 +139,70 @@ export default function NewSalePage() {
     const supabase = createClient()
     await supabase.auth.signOut()
     setSaleMode(false)
+    setTpvFlow(null)
+    setActiveEvent(null)
     router.push('/login')
   }
 
+  // Cada vez que se entra a /sales/new (admin o TPV) mostramos el selector
+  // de modo "Evento vs Venta rápida". El tpvFlow vive solo en memoria, no se
+  // persiste — al recargar/navegar, vuelve a aparecer la pregunta.
+  useEffect(() => {
+    setTpvFlow(null)
+    setActiveEvent(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Admin: pulsa "Vender en evento" en el banner → abre selector de eventos
+  const handleSwitchToEvent = () => {
+    cart.clearCart()
+    setActiveEvent(null)
+    setTpvFlow('event')
+  }
+
+  // Admin: pulsa "Volver a venta rápida" en el banner
+  const handleSwitchToQuick = () => {
+    cart.clearCart()
+    setActiveEvent(null)
+    setTpvFlow('quick')
+  }
+
+  // TPV (PIN): volver al selector de modo
+  const handleChangeMode = () => {
+    cart.clearCart()
+    setTpvFlow(null)
+    setActiveEvent(null)
+  }
+
+  const handleBackToDashboard = () => {
+    router.push('/dashboard')
+  }
+
   const cartCount = cart.itemCount()
+
+  // ── Renders condicionales: selector de modo / selector de evento ──────────
+  // Solo se muestra el selector inicial al TPV. El admin entra directo a quick.
+  if (!tpvFlow) {
+    return (
+      <TpvModeSelector
+        onPickQuick={() => setTpvFlow('quick')}
+        onPickEvent={() => setTpvFlow('event')}
+        onBack={isSaleMode ? undefined : handleBackToDashboard}
+        onExit={isSaleMode ? handleExitSaleMode : undefined}
+      />
+    )
+  }
+
+  if (tpvFlow === 'event' && !activeEvent) {
+    return (
+      <EventPicker
+        onPick={(ev) => setActiveEvent(ev)}
+        onBack={isSaleMode ? () => setTpvFlow(null) : handleSwitchToQuick}
+        onExit={isSaleMode ? handleExitSaleMode : undefined}
+        backLabel={isSaleMode ? 'Atrás' : 'Venta rápida'}
+      />
+    )
+  }
 
   return (
     <div className="h-full flex flex-col bg-[#0a0a0a]">
@@ -172,6 +257,45 @@ export default function NewSalePage() {
         </div>
       </div>
 
+      {/* Banner de modo / evento activo */}
+      <div className={`flex items-center gap-2 px-3 py-2 border-b shrink-0 ${isEventMode ? 'bg-amber-500/10 border-amber-900/50' : 'bg-zinc-900 border-zinc-800'}`}>
+        <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${isEventMode ? 'bg-amber-500 text-black' : 'bg-white text-black'}`}>
+          {isEventMode ? <CalendarDays size={15} strokeWidth={2.5} /> : <Zap size={15} strokeWidth={2.5} fill="currentColor" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          {isEventMode ? (
+            <>
+              <p className="text-white text-xs font-bold truncate leading-tight">{activeEvent!.name}</p>
+              <p className="text-amber-400 text-[10px] leading-tight">{activeEvent!.city} · {activeEvent!.venue}</p>
+            </>
+          ) : (
+            <p className="text-white text-xs font-bold leading-tight">Venta rápida (fuera de evento)</p>
+          )}
+        </div>
+        {isSaleMode ? (
+          <button
+            onClick={handleChangeMode}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white text-[10px] font-medium shrink-0"
+          >
+            <RotateCcw size={11} />Cambiar
+          </button>
+        ) : isEventMode ? (
+          <button
+            onClick={handleSwitchToQuick}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white text-black text-[10px] font-bold shrink-0"
+          >
+            <Zap size={11} fill="currentColor" />Venta rápida
+          </button>
+        ) : (
+          <button
+            onClick={handleSwitchToEvent}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500 text-black text-[10px] font-bold shrink-0"
+          >
+            <CalendarDays size={11} />Vender en evento
+          </button>
+        )}
+      </div>
+
       {/* ── Tabs deslizables ── */}
       <SwipeableTabs
         activeKey={tab}
@@ -188,9 +312,13 @@ export default function NewSalePage() {
               </span>
             ),
             content: loadingProducts ? <LoadingSpinner /> : products.length === 0 ? (
-              <EmptyState icon={<Package size={40} />} text="No hay productos activos" />
+              <EmptyState
+                icon={<Package size={40} />}
+                text={isEventMode ? 'Este evento no tiene productos asignados todavía' : 'No hay productos activos'}
+                hint={isEventMode ? 'El admin debe asignar stock al evento desde Eventos → Stock evento' : undefined}
+              />
             ) : (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3 auto-rows-min">
                 {products.map(product => {
                   const isTextile = product.category?.name === 'Textil'
                   return (
@@ -836,6 +964,113 @@ function EmptyState({ icon, text, hint }: { icon: React.ReactNode; text: string;
       {icon}
       <p className="mt-3 text-sm">{text}</p>
       {hint && <p className="mt-1 text-xs text-zinc-700">{hint}</p>}
+    </div>
+  )
+}
+
+// ─── Selector de modo: Evento vs Venta rápida ───────────────────────────────
+function TpvModeSelector({ onPickQuick, onPickEvent, onBack, onExit }: {
+  onPickQuick: () => void
+  onPickEvent: () => void
+  onBack?: () => void
+  onExit?: () => void
+}) {
+  return (
+    <div className="h-full flex flex-col bg-[#0a0a0a]">
+      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-zinc-800 shrink-0">
+        {onBack ? (
+          <button onClick={onBack} className="p-2 rounded-xl text-zinc-400 hover:bg-zinc-800 -ml-2">
+            <ChevronLeft size={20} />
+          </button>
+        ) : <div className="w-2" />}
+        <p className="text-white font-bold text-lg flex-1 text-center">¿Qué tipo de venta?</p>
+        {onExit ? (
+          <button onClick={onExit} className="p-2 rounded-xl bg-zinc-800 text-zinc-500"><LogOut size={16} /></button>
+        ) : <div className="w-9" />}
+      </div>
+      <div className="flex-1 flex flex-col gap-4 p-5 justify-center max-w-md mx-auto w-full">
+        <button
+          onClick={onPickEvent}
+          className="bg-amber-500 hover:bg-amber-400 rounded-3xl p-7 flex flex-col items-center gap-3 active:scale-[0.98] transition-transform shadow-2xl shadow-amber-500/20"
+        >
+          <CalendarDays size={44} className="text-black" strokeWidth={2.5} />
+          <div className="text-center">
+            <p className="text-black text-2xl font-black leading-none">EVENTO</p>
+            <p className="text-black/70 text-sm font-medium mt-1">Vender el stock llevado a un concierto</p>
+          </div>
+        </button>
+        <button
+          onClick={onPickQuick}
+          className="bg-white hover:bg-zinc-100 rounded-3xl p-7 flex flex-col items-center gap-3 active:scale-[0.98] transition-transform shadow-2xl shadow-white/10"
+        >
+          <Zap size={44} className="text-black" strokeWidth={2.5} fill="currentColor" />
+          <div className="text-center">
+            <p className="text-black text-2xl font-black leading-none">VENTA RÁPIDA</p>
+            <p className="text-black/60 text-sm font-medium mt-1">Stock global · backstage, ensayos, ventas sueltas</p>
+          </div>
+        </button>
+        <p className="text-zinc-600 text-xs text-center mt-2">
+          Modo evento: descuenta del stock reservado para el concierto.<br />
+          Venta rápida: descuenta del inventario general.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ─── Selector de evento activo para el modo Evento ──────────────────────────
+function EventPicker({ onPick, onBack, onExit, backLabel = 'Atrás' }: {
+  onPick: (event: Event) => void
+  onBack: () => void
+  onExit?: () => void
+  backLabel?: string
+}) {
+  const { events, loading } = useEvents()
+  const activeEvents = events.filter(e => e.status === 'active')
+
+  return (
+    <div className="h-full flex flex-col bg-[#0a0a0a]">
+      <div className="flex items-center gap-2 px-3 py-3 border-b border-zinc-800 shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-zinc-400 hover:bg-zinc-800 text-xs font-medium">
+          <ChevronLeft size={16} />{backLabel}
+        </button>
+        <p className="flex-1 text-white font-bold text-center">Selecciona evento</p>
+        {onExit ? (
+          <button onClick={onExit} className="p-2 rounded-xl bg-zinc-800 text-zinc-500"><LogOut size={16} /></button>
+        ) : <div className="w-9" />}
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {loading ? (
+          <div className="flex items-center justify-center py-16"><div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>
+        ) : activeEvents.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-zinc-600">
+            <CalendarDays size={40} />
+            <p className="mt-3 text-sm font-medium">No hay eventos activos</p>
+            <p className="mt-1 text-xs text-zinc-700 text-center px-4">El admin debe activar un evento desde la pestaña Eventos antes de vender en modo evento.</p>
+          </div>
+        ) : (
+          activeEvents.map(ev => (
+            <button key={ev.id} onClick={() => onPick(ev)} className="w-full text-left active:scale-[0.99] transition-transform">
+              <Card padding="none" className="border-amber-500/30 hover:border-amber-500">
+                <div className="p-4 flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center shrink-0">
+                    <CalendarDays size={22} className="text-amber-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white font-bold truncate">{ev.name}</p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className="flex items-center gap-1 text-[11px] text-zinc-500"><MapPin size={11} />{ev.city}</span>
+                      <span className="flex items-center gap-1 text-[11px] text-zinc-500"><Building2 size={11} />{ev.venue}</span>
+                      <span className="flex items-center gap-1 text-[11px] text-zinc-500"><CalendarDays size={11} />{formatDate(ev.date)}</span>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-zinc-600" />
+                </div>
+              </Card>
+            </button>
+          ))
+        )}
+      </div>
     </div>
   )
 }

@@ -26,7 +26,8 @@ export async function savePendingSale(sale: OfflineSale): Promise<void> {
 
 export async function getPendingSales(): Promise<OfflineSale[]> {
   const database = await getDB()
-  return database.getAllFromIndex('offline_sales', 'by-pending', true)
+  const all: OfflineSale[] = await database.getAll('offline_sales')
+  return all.filter(s => s.pending_sync)
 }
 
 export async function markSaleSynced(id: string): Promise<void> {

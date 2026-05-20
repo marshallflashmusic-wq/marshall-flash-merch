@@ -97,9 +97,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: rpcError.message }, { status: 500 })
     }
 
-    // Decrementar stock de variantes (tallas) cuando aplica
+    // Decrementar stock de variantes (tallas) — SOLO en venta rápida.
+    // En venta de evento, la variant ya se descontó al asignar; el descuento por venta
+    // se aplica únicamente sobre event_inventory.quantity_sold (gestionado en process_sale).
     const variantDecrements = (stockDecrements ?? []).filter(
-      (d: { variant_id?: string; quantity: number }) => d.variant_id
+      (d: { variant_id?: string; quantity: number; event_inventory_id?: string }) => d.variant_id && !d.event_inventory_id
     )
     for (const decr of variantDecrements as { variant_id: string; quantity: number }[]) {
       const { data: v } = await supabase
@@ -164,34 +166,32 @@ export async function DELETE(request: NextRequest) {
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
   if (restoreStock) {
-    const { data: items } = await supabase
-      .from('sale_items')
-      .select('product_id, pack_id, quantity')
-      .eq('sale_id', id)
+    // restore_sale_stock revierte tanto ventas globales como de evento,
+    // usando inventory_movements como fuente de verdad.
+    const { error: rpcError } = await supabase.rpc('restore_sale_stock', { p_sale_id: id })
+    if (rpcError) {
+      // Fallback al método antiguo si la función nueva no está disponible
+      console.warn('[DELETE /api/sales] restore_sale_stock no disponible, usando fallback:', rpcError.message)
+      const { data: items } = await supabase
+        .from('sale_items')
+        .select('product_id, pack_id, quantity')
+        .eq('sale_id', id)
 
-    const stockIncrements: Record<string, number> = {}
-
-    for (const item of items ?? []) {
-      if (item.product_id) {
-        stockIncrements[item.product_id] = (stockIncrements[item.product_id] ?? 0) + item.quantity
-      } else if (item.pack_id) {
-        const { data: packItems } = await supabase
-          .from('pack_items')
-          .select('product_id, quantity')
-          .eq('pack_id', item.pack_id)
-        for (const pi of packItems ?? []) {
-          stockIncrements[pi.product_id] = (stockIncrements[pi.product_id] ?? 0) + pi.quantity * item.quantity
+      const stockIncrements: Record<string, number> = {}
+      for (const item of items ?? []) {
+        if (item.product_id) {
+          stockIncrements[item.product_id] = (stockIncrements[item.product_id] ?? 0) + item.quantity
+        } else if (item.pack_id) {
+          const { data: packItems } = await supabase
+            .from('pack_items')
+            .select('product_id, quantity')
+            .eq('pack_id', item.pack_id)
+          for (const pi of packItems ?? []) {
+            stockIncrements[pi.product_id] = (stockIncrements[pi.product_id] ?? 0) + pi.quantity * item.quantity
+          }
         }
       }
-    }
-
-    for (const [productId, qty] of Object.entries(stockIncrements)) {
-      const { error: rpcError } = await supabase.rpc('increment_stock', {
-        p_product_id: productId,
-        p_quantity: qty,
-        p_sale_id: id,
-      })
-      if (rpcError) {
+      for (const [productId, qty] of Object.entries(stockIncrements)) {
         const { data: prod } = await supabase
           .from('products').select('stock').eq('id', productId).single()
         if (prod) {

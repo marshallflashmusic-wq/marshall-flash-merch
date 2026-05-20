@@ -1,6 +1,6 @@
 'use client'
-import { useState, useEffect } from 'react'
-import { Clock, Filter, Banknote, Smartphone, CreditCard, Wallet, Download, X, Trash2, MessageSquare, Pencil, Package2 } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { Clock, Filter, Banknote, Smartphone, CreditCard, Wallet, Download, X, Trash2, MessageSquare, Pencil, Package2, CalendarDays, Zap } from 'lucide-react'
 import { useSalesHistory } from '@/hooks/useSales'
 import { useEvents } from '@/hooks/useEvents'
 import { useAppStore } from '@/store/appStore'
@@ -11,6 +11,8 @@ import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import type { Sale, PaymentMethod, SaleFilters } from '@/types'
+
+type ScopeTab = 'all' | 'events' | 'quick'
 
 const paymentIcons: Record<PaymentMethod, React.ElementType> = {
   efectivo: Banknote,
@@ -52,6 +54,28 @@ export default function SalesHistoryPage() {
   const [editError, setEditError] = useState('')
   const { sales, loading, total, refetch } = useSalesHistory(filters)
   const { isSaleMode } = useAppStore()
+  const [scope, setScope] = useState<ScopeTab>('all')
+
+  const scopedSales = useMemo(() => {
+    if (scope === 'events') return sales.filter(s => !!s.event_id)
+    if (scope === 'quick')  return sales.filter(s => !s.event_id)
+    return sales
+  }, [sales, scope])
+
+  // Agrupado por evento para la pestaña "En eventos"
+  const groupedByEvent = useMemo(() => {
+    if (scope !== 'events') return [] as { event: Sale['event']; sales: Sale[] }[]
+    const map = new Map<string, { event: Sale['event']; sales: Sale[] }>()
+    for (const s of scopedSales) {
+      const key = s.event_id ?? '__none__'
+      if (!map.has(key)) map.set(key, { event: s.event, sales: [] })
+      map.get(key)!.sales.push(s)
+    }
+    return Array.from(map.values())
+  }, [scopedSales, scope])
+
+  const eventCount = useMemo(() => sales.filter(s => !!s.event_id).length, [sales])
+  const quickCount = useMemo(() => sales.filter(s => !s.event_id).length, [sales])
 
   // Auto-refresco cada 10s + al volver a la pestaña
   useEffect(() => {
@@ -135,8 +159,8 @@ export default function SalesHistoryPage() {
     }
   }
 
-  const totalRevenue = sales.reduce((a, s) => a + s.total_amount, 0)
-  const totalProfit = sales.reduce((a, s) => a + s.profit, 0)
+  const totalRevenue = scopedSales.reduce((a, s) => a + s.total_amount, 0)
+  const totalProfit = scopedSales.reduce((a, s) => a + s.profit, 0)
 
   const exportCSV = () => {
     const rows = [
@@ -183,12 +207,34 @@ export default function SalesHistoryPage() {
         }
       />
 
+      {/* Pestañas Total / Eventos / Rápidas */}
+      <div className="px-4 pt-3 pb-1 shrink-0">
+        <div className="flex bg-zinc-900 border border-zinc-800 rounded-xl p-1 gap-1">
+          {([
+            { key: 'all', label: 'Totales', count: sales.length },
+            { key: 'events', label: 'En eventos', count: eventCount },
+            { key: 'quick', label: 'Rápidas', count: quickCount },
+          ] as { key: ScopeTab; label: string; count: number }[]).map(t => (
+            <button
+              key={t.key}
+              onClick={() => setScope(t.key)}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                scope === t.key ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              {t.label}
+              {t.count > 0 && <span className={`ml-1.5 text-[10px] ${scope === t.key ? 'text-black/60' : 'text-zinc-500'}`}>{t.count}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Resumen */}
-      {sales.length > 0 && (
-        <div className={`grid gap-2 px-4 pt-4 shrink-0 ${isSaleMode ? 'grid-cols-2' : 'grid-cols-3'}`}>
+      {scopedSales.length > 0 && (
+        <div className={`grid gap-2 px-4 pt-3 shrink-0 ${isSaleMode ? 'grid-cols-2' : 'grid-cols-3'}`}>
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
             <p className="text-zinc-500 text-xs">Ventas</p>
-            <p className="text-white font-black text-lg">{sales.length}</p>
+            <p className="text-white font-black text-lg">{scopedSales.length}</p>
           </div>
           <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
             <p className="text-zinc-500 text-xs">Ingresos</p>
@@ -225,79 +271,53 @@ export default function SalesHistoryPage() {
           <div className="flex items-center justify-center py-20">
             <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : sales.length === 0 ? (
+        ) : scopedSales.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-zinc-600">
             <Clock size={40} />
-            <p className="mt-3 text-sm">No hay ventas registradas</p>
+            <p className="mt-3 text-sm">
+              {scope === 'events' ? 'No hay ventas en eventos' : scope === 'quick' ? 'No hay ventas rápidas' : 'No hay ventas registradas'}
+            </p>
           </div>
-        ) : (
-          sales.map(sale => {
-            const Icon = paymentIcons[sale.payment_method] ?? Banknote
-            const color = paymentColors[sale.payment_method] ?? 'text-zinc-400'
+        ) : scope === 'events' ? (
+          // Agrupado por evento
+          groupedByEvent.map(group => {
+            const groupRevenue = group.sales.reduce((a, s) => a + s.total_amount, 0)
             return (
-              <Card key={sale.id} padding="none">
-                <div
-                  className="flex items-center gap-3 p-3 cursor-pointer active:bg-zinc-800/50"
-                  onClick={() => setSelectedSale(sale)}
-                >
-                  <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center shrink-0">
-                    <Icon size={18} className={color} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-white font-semibold text-sm">{formatCurrency(sale.total_amount)}</p>
-                      {!sale.synced && <Badge variant="warning">Pendiente sync</Badge>}
-                      {sale.notes && <MessageSquare size={12} className="text-zinc-400 shrink-0" />}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <p className="text-zinc-500 text-xs">{formatDateTime(sale.created_at)}</p>
-                      {(sale.seller_name ?? sale.user?.name) && (
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
-                          sale.seller_type === 'tpv'
-                            ? 'bg-blue-950/60 text-blue-400'
-                            : 'bg-zinc-800 text-zinc-400'
-                        }`}>
-                          {sale.seller_name ?? sale.user?.name}
-                        </span>
-                      )}
-                    </div>
-                    {sale.items && (
-                      <p className="text-zinc-600 text-xs truncate">
-                        {sale.items.map(i => `${i.quantity}× ${i.product?.name ?? i.pack?.name ?? '?'}`).join(', ')}
-                      </p>
-                    )}
-                  </div>
-                  <div className="text-right shrink-0">
-                    {!isSaleMode && (
-                      <p className={`text-sm font-bold ${sale.profit < 0 ? 'text-red-400' : 'text-green-400'}`}>
-                        {sale.profit < 0 ? '' : '+'}{formatCurrency(sale.profit)}
-                      </p>
-                    )}
-                    <p className="text-zinc-600 text-xs">{paymentLabels[sale.payment_method]}</p>
-                  </div>
+              <div key={group.event?.id ?? '__none__'} className="space-y-2">
+                <div className="flex items-center gap-2 pt-2 pb-1">
+                  <CalendarDays size={14} className="text-amber-500" />
+                  <p className="text-white font-bold text-sm flex-1 truncate">
+                    {group.event?.name ?? 'Evento eliminado'}
+                  </p>
+                  <span className="text-amber-400 text-xs font-semibold">{formatCurrency(groupRevenue)}</span>
+                  <span className="text-zinc-500 text-xs">· {group.sales.length} venta{group.sales.length !== 1 ? 's' : ''}</span>
                 </div>
-                {!isSaleMode && (
-                  <div className="border-t border-zinc-800 flex">
-                    <button
-                      onClick={() => openEdit(sale)}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs text-zinc-400 hover:bg-zinc-800/50 transition-colors border-r border-zinc-800"
-                    >
-                      <Pencil size={12} />
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(sale)}
-                      disabled={deletingId === sale.id}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs text-red-500 hover:bg-red-950/30 transition-colors disabled:opacity-40"
-                    >
-                      <Trash2 size={12} />
-                      {deletingId === sale.id ? 'Eliminando...' : 'Eliminar'}
-                    </button>
-                  </div>
-                )}
-              </Card>
+                {group.sales.map(sale => (
+                  <SaleRow
+                    key={sale.id}
+                    sale={sale}
+                    isSaleMode={isSaleMode}
+                    deletingId={deletingId}
+                    onSelect={() => setSelectedSale(sale)}
+                    onEdit={() => openEdit(sale)}
+                    onDelete={() => handleDelete(sale)}
+                  />
+                ))}
+              </div>
             )
           })
+        ) : (
+          scopedSales.map(sale => (
+            <SaleRow
+              key={sale.id}
+              sale={sale}
+              isSaleMode={isSaleMode}
+              deletingId={deletingId}
+              onSelect={() => setSelectedSale(sale)}
+              onEdit={() => openEdit(sale)}
+              onDelete={() => handleDelete(sale)}
+            />
+          ))
         )}
       </div>
 
@@ -611,5 +631,94 @@ export default function SalesHistoryPage() {
         </div>
       </Modal>
     </div>
+  )
+}
+
+function SaleRow({
+  sale, isSaleMode, deletingId, onSelect, onEdit, onDelete,
+}: {
+  sale: Sale
+  isSaleMode: boolean
+  deletingId: string | null
+  onSelect: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const Icon = paymentIcons[sale.payment_method] ?? Banknote
+  const color = paymentColors[sale.payment_method] ?? 'text-zinc-400'
+
+  return (
+    <Card padding="none">
+      <div
+        className="flex items-center gap-3 p-3 cursor-pointer active:bg-zinc-800/50"
+        onClick={onSelect}
+      >
+        <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center shrink-0">
+          <Icon size={18} className={color} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-white font-semibold text-sm">{formatCurrency(sale.total_amount)}</p>
+            {sale.event ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-950/60 text-amber-400 border border-amber-900/50">
+                <CalendarDays size={9} />
+                {sale.event.name}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
+                <Zap size={9} />
+                Rápida
+              </span>
+            )}
+            {!sale.synced && <Badge variant="warning">Pendiente sync</Badge>}
+            {sale.notes && <MessageSquare size={12} className="text-zinc-400 shrink-0" />}
+          </div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-zinc-500 text-xs">{formatDateTime(sale.created_at)}</p>
+            {(sale.seller_name ?? sale.user?.name) && (
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                sale.seller_type === 'tpv'
+                  ? 'bg-blue-950/60 text-blue-400'
+                  : 'bg-zinc-800 text-zinc-400'
+              }`}>
+                {sale.seller_name ?? sale.user?.name}
+              </span>
+            )}
+          </div>
+          {sale.items && (
+            <p className="text-zinc-600 text-xs truncate">
+              {sale.items.map(i => `${i.quantity}× ${i.product?.name ?? i.pack?.name ?? '?'}`).join(', ')}
+            </p>
+          )}
+        </div>
+        <div className="text-right shrink-0">
+          {!isSaleMode && (
+            <p className={`text-sm font-bold ${sale.profit < 0 ? 'text-red-400' : 'text-green-400'}`}>
+              {sale.profit < 0 ? '' : '+'}{formatCurrency(sale.profit)}
+            </p>
+          )}
+          <p className="text-zinc-600 text-xs">{paymentLabels[sale.payment_method]}</p>
+        </div>
+      </div>
+      {!isSaleMode && (
+        <div className="px-3 pb-3 pt-1 flex gap-2">
+          <button
+            onClick={onEdit}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 active:scale-[0.98] transition-all"
+          >
+            <Pencil size={13} />
+            Editar
+          </button>
+          <button
+            onClick={onDelete}
+            disabled={deletingId === sale.id}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-red-950/40 border border-red-900/70 text-xs font-semibold text-red-400 hover:bg-red-950/70 active:scale-[0.98] transition-all disabled:opacity-40"
+          >
+            <Trash2 size={13} />
+            {deletingId === sale.id ? 'Eliminando...' : 'Eliminar'}
+          </button>
+        </div>
+      )}
+    </Card>
   )
 }

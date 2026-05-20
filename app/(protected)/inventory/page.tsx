@@ -3,6 +3,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Plus, Search, Minus, Edit2, AlertTriangle, Package,
   X, Filter, ChevronDown, Check, Trash2, GripVertical, Package2,
+  CalendarDays,
 } from 'lucide-react'
 import {
   DndContext, closestCenter, PointerSensor, TouchSensor,
@@ -30,6 +31,28 @@ import type { Product } from '@/types'
 type FilterStatus = 'all' | 'low_stock' | 'out_of_stock' | 'active' | 'inactive'
 type Tab = 'products' | 'packs'
 
+type EventAllocation = {
+  id: string
+  event_id: string
+  event_name: string
+  event_city: string
+  event_status: string
+  product_id: string
+  variant_id: string | null
+  variant_size: string | null
+  quantity_assigned: number
+  quantity_sold: number
+  quantity_remaining: number
+}
+
+type EventAllocationGrouped = {
+  event_id: string
+  event_name: string
+  event_status: string
+  variant_size: string | null
+  quantity_remaining: number
+}
+
 export default function InventoryPage() {
   const { user } = useAppStore()
   const { products, loading, refetch } = useAllProducts()
@@ -44,6 +67,46 @@ export default function InventoryPage() {
   const [adjustStock, setAdjustStock] = useState<{ product: Product; delta: number } | null>(null)
   const [saving, setSaving] = useState(false)
   const [orderError, setOrderError] = useState('')
+  const [allocations, setAllocations] = useState<EventAllocation[]>([])
+
+  // Carga las asignaciones a eventos no cerrados, para mostrar pills bajo cada producto
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch('/api/inventory/event-allocations', { cache: 'no-store' })
+        if (!res.ok) return
+        const j = await res.json()
+        setAllocations(j.allocations ?? [])
+      } catch { /* silencioso */ }
+    }
+    load()
+    const interval = setInterval(load, 15_000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Mapa product_id → asignaciones acumuladas por evento
+  const allocationsByProduct = useMemo(() => {
+    const map = new Map<string, EventAllocationGrouped[]>()
+    for (const a of allocations) {
+      if (a.quantity_remaining <= 0) continue
+      const list = map.get(a.product_id) ?? []
+      // Si la asignación es por variante, mantenemos talla; si no, agregamos sin talla
+      const idx = list.findIndex(x => x.event_id === a.event_id && (x.variant_size ?? null) === (a.variant_size ?? null))
+      if (idx >= 0) {
+        list[idx].quantity_remaining += a.quantity_remaining
+      } else {
+        list.push({
+          event_id: a.event_id,
+          event_name: a.event_name,
+          event_status: a.event_status,
+          variant_size: a.variant_size,
+          quantity_remaining: a.quantity_remaining,
+        })
+      }
+      map.set(a.product_id, list)
+    }
+    return map
+  }, [allocations])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -235,7 +298,7 @@ export default function InventoryPage() {
   return (
     <div className="h-full flex flex-col">
       <TopBar
-        title="Inventario"
+        title="Stock global"
         subtitle={activeTab === 'products' ? `${orderedProducts.length} artículos` : 'Packs'}
         actions={
           <button
@@ -315,9 +378,16 @@ export default function InventoryPage() {
                       <div className="px-4 pb-4 space-y-2">
                         {canReorder && <p className="text-xs text-zinc-600 text-center pb-1">Mantén pulsado y arrastra para reordenar</p>}
                         {filtered.map(product => (
-                          <SortableProductCard key={product.id} product={product} canReorder={canReorder}
-                            onEdit={() => setEditProduct(product)} onToggleActive={() => handleToggleActive(product)}
-                            onStockDown={() => handleQuickStock(product, -1)} onStockUp={() => handleQuickStock(product, 1)} />
+                          <SortableProductCard
+                            key={product.id}
+                            product={product}
+                            canReorder={canReorder}
+                            allocations={allocationsByProduct.get(product.id) ?? []}
+                            onEdit={() => setEditProduct(product)}
+                            onToggleActive={() => handleToggleActive(product)}
+                            onStockDown={() => handleQuickStock(product, -1)}
+                            onStockUp={() => handleQuickStock(product, 1)}
+                          />
                         ))}
                       </div>
                     </SortableContext>
@@ -611,9 +681,10 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
   )
 }
 
-function SortableProductCard({ product, canReorder, onEdit, onToggleActive, onStockDown, onStockUp }: {
+function SortableProductCard({ product, canReorder, allocations, onEdit, onToggleActive, onStockDown, onStockUp }: {
   product: Product
   canReorder: boolean
+  allocations: EventAllocationGrouped[]
   onEdit: () => void
   onToggleActive: () => void
   onStockDown: () => void
@@ -723,6 +794,24 @@ function SortableProductCard({ product, canReorder, onEdit, onToggleActive, onSt
             )}
           </div>
         </div>
+
+        {/* Pills de asignación a eventos — alineadas a la derecha, justo debajo del stock global */}
+        {allocations.length > 0 && (
+          <div className="flex flex-wrap gap-1 justify-end px-3 pb-2 -mt-1">
+            {allocations.map((a, i) => (
+              <span
+                key={`${a.event_id}-${a.variant_size ?? 'all'}-${i}`}
+                className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-700/60"
+                title={`${a.event_name} · ${a.quantity_remaining} ud${a.quantity_remaining !== 1 ? 's' : ''} reservadas en el evento`}
+              >
+                <CalendarDays size={9} className="text-amber-400" />
+                <span className="truncate max-w-[120px]">{a.event_name}</span>
+                {a.variant_size && <span className="text-amber-200/80">·{a.variant_size}</span>}
+                <span className="text-white">·{a.quantity_remaining}</span>
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex border-t border-zinc-800">

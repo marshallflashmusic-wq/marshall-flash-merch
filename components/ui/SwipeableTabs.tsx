@@ -13,6 +13,7 @@ interface Props {
   onChange: (key: string) => void
   tabBarClassName?: string
   panelClassName?: string   // clase extra para cada panel (p.ej. padding)
+  swipeDisabled?: boolean   // bloquea swipe horizontal (ej.: modal abierto)
 }
 
 export default function SwipeableTabs({
@@ -21,6 +22,7 @@ export default function SwipeableTabs({
   onChange,
   tabBarClassName = '',
   panelClassName = '',
+  swipeDisabled = false,
 }: Props) {
   const n = tabs.length
   const currentIndex = Math.max(0, tabs.findIndex(t => t.key === activeKey))
@@ -40,13 +42,21 @@ export default function SwipeableTabs({
     setDragging(false)
   }
 
+  // Si hay un Modal abierto, document.body.style.overflow === 'hidden'.
+  // En ese caso ignoramos el swipe (evita que el usuario cambie de tab
+  // mientras está rellenando un formulario en un modal).
+  const isModalOpen = () =>
+    typeof document !== 'undefined' && document.body.style.overflow === 'hidden'
+
   const handleTouchStart = (e: React.TouchEvent) => {
+    if (swipeDisabled || isModalOpen()) return
     startX.current = e.touches[0].clientX
     startY.current = e.touches[0].clientY
     dir.current    = null
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    if (swipeDisabled || isModalOpen()) return
     if (startX.current === null || startY.current === null) return
     const dx = e.touches[0].clientX - startX.current
     const dy = e.touches[0].clientY - startY.current
@@ -69,6 +79,7 @@ export default function SwipeableTabs({
   }
 
   const handleTouchEnd = (e: React.TouchEvent) => {
+    if (swipeDisabled) { reset(); return }
     if (!dragging) { reset(); return }
 
     const dx = e.changedTouches[0].clientX - (startX.current ?? 0)
