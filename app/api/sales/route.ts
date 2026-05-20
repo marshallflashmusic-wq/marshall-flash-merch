@@ -117,6 +117,40 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Para ventas EN CONCIERTO con almacén origen registrado, descontar
+    // warehouse_stock del almacén indicado en event_inventory.warehouse_id.
+    // Así el almacén refleja que esas unidades ya no están físicamente allí.
+    const eventDecrements = (stockDecrements ?? []).filter(
+      (d: { event_inventory_id?: string; product_id: string; variant_id?: string; quantity: number }) => !!d.event_inventory_id
+    ) as { event_inventory_id: string; product_id: string; variant_id?: string; quantity: number }[]
+    for (const d of eventDecrements) {
+      const { data: einv } = await supabase
+        .from('event_inventory')
+        .select('warehouse_id')
+        .eq('id', d.event_inventory_id)
+        .single()
+      const whId = einv?.warehouse_id
+      if (!whId) continue
+      let q = supabase
+        .from('warehouse_stock')
+        .select('id, quantity')
+        .eq('warehouse_id', whId)
+        .eq('product_id', d.product_id)
+      if (d.variant_id) q = q.eq('variant_id', d.variant_id)
+      else q = q.is('variant_id', null)
+      const { data: row } = await q.maybeSingle()
+      if (!row) continue
+      const next = Math.max(0, (row.quantity ?? 0) - d.quantity)
+      if (next === 0) {
+        await supabase.from('warehouse_stock').delete().eq('id', row.id)
+      } else {
+        await supabase
+          .from('warehouse_stock')
+          .update({ quantity: next, updated_at: new Date().toISOString() })
+          .eq('id', row.id)
+      }
+    }
+
     const saleId = (result as { sale_id: string; duplicate: boolean })?.sale_id
     return NextResponse.json({ sale: { id: saleId } })
   } catch (e) {
@@ -165,6 +199,35 @@ export async function DELETE(request: NextRequest) {
 
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
+  // Antes de borrar la venta, guardamos los movimientos para poder devolver
+  // unidades a warehouse_stock del almacén origen.
+  type RestoreMov = { product_id: string; variant_id: string | null; quantity: number; warehouse_id: string }
+  let restoreToWarehouse: RestoreMov[] = []
+  if (restoreStock) {
+    const { data: movs } = await supabase
+      .from('inventory_movements')
+      .select('product_id, quantity, event_inventory_id')
+      .eq('reference_id', id)
+      .in('type', ['sale', 'pack_sale'])
+    const eventInvIds = Array.from(new Set((movs ?? []).map(m => m.event_inventory_id).filter(Boolean))) as string[]
+    let whByInv = new Map<string, { warehouse_id: string | null; variant_id: string | null }>()
+    if (eventInvIds.length > 0) {
+      const { data: einvRows } = await supabase
+        .from('event_inventory')
+        .select('id, warehouse_id, variant_id')
+        .in('id', eventInvIds)
+      whByInv = new Map((einvRows ?? []).map(r => [r.id, { warehouse_id: r.warehouse_id ?? null, variant_id: r.variant_id ?? null }]))
+    }
+    restoreToWarehouse = (movs ?? [])
+      .map(m => {
+        const inv = m.event_inventory_id ? whByInv.get(m.event_inventory_id) : undefined
+        return inv?.warehouse_id
+          ? { product_id: m.product_id, variant_id: inv.variant_id ?? null, quantity: m.quantity, warehouse_id: inv.warehouse_id }
+          : null
+      })
+      .filter((x): x is RestoreMov => !!x)
+  }
+
   if (restoreStock) {
     // restore_sale_stock revierte tanto ventas globales como de evento,
     // usando inventory_movements como fuente de verdad.
@@ -201,6 +264,30 @@ export async function DELETE(request: NextRequest) {
           }).eq('id', productId)
         }
       }
+    }
+  }
+
+  // Devolver al almacén origen las unidades restauradas (solo si la venta era
+  // en concierto y el event_inventory tenía warehouse_id).
+  for (const mov of restoreToWarehouse) {
+    if (!mov.warehouse_id) continue
+    let q = supabase
+      .from('warehouse_stock')
+      .select('id, quantity')
+      .eq('warehouse_id', mov.warehouse_id)
+      .eq('product_id', mov.product_id)
+    if (mov.variant_id) q = q.eq('variant_id', mov.variant_id)
+    else q = q.is('variant_id', null)
+    const { data: row } = await q.maybeSingle()
+    if (row) {
+      await supabase
+        .from('warehouse_stock')
+        .update({ quantity: (row.quantity ?? 0) + mov.quantity, updated_at: new Date().toISOString() })
+        .eq('id', row.id)
+    } else {
+      await supabase
+        .from('warehouse_stock')
+        .insert({ warehouse_id: mov.warehouse_id, product_id: mov.product_id, variant_id: mov.variant_id, quantity: mov.quantity })
     }
   }
 

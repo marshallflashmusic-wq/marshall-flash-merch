@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import {
   Warehouse, Plus, Edit2, Trash2, Boxes, Package,
-  ChevronDown, AlertTriangle, Check, Download,
+  ChevronDown, AlertTriangle, Check, Download, RotateCcw,
 } from 'lucide-react'
 import TopBar from '@/components/layout/TopBar'
 import Card from '@/components/ui/Card'
@@ -66,6 +66,7 @@ export default function WarehousesPage() {
   const [fillingId, setFillingId] = useState<string | null>(null)
   const [fillResult, setFillResult] = useState<{ id: string; units: number } | null>(null)
   const [unassignedOpen, setUnassignedOpen] = useState(false)
+  const [reconciling, setReconciling] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -191,6 +192,22 @@ export default function WarehousesPage() {
     load()
   }
 
+  const handleReconcile = async () => {
+    if (!confirm('Esto recorta el stock asignado a almacenes para que cuadre con el stock real. Las unidades que sobraran se descontarán del almacén con más cantidad. ¿Continuar?')) return
+    setReconciling(true)
+    try {
+      const res = await fetch('/api/warehouses/reconcile', { method: 'POST' })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Error')
+      alert(`Conciliado: ${j.result?.units_removed ?? 0} unidades retiradas.`)
+      load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Error al conciliar')
+    } finally {
+      setReconciling(false)
+    }
+  }
+
   const handleFill = async (wh: Warehouse) => {
     if (totalSinUbicar === 0) return
     if (!confirm(`Añadir las ${totalSinUbicar} unidades sin ubicar a "${wh.name}"?`)) return
@@ -257,6 +274,25 @@ export default function WarehousesPage() {
               </p>
               <ChevronDown size={14} className="text-amber-500 shrink-0 mt-0.5 -rotate-90" />
             </button>
+          )}
+          {totalUbicado > totalGlobal && (
+            <div className="mt-3 bg-red-950/40 border border-red-900/60 rounded-xl px-3 py-2 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                <p className="text-red-300 text-xs flex-1">
+                  Hay {totalUbicado - totalGlobal} unidades de más en almacenes que en el stock real (descuadre por ventas antiguas no reflejadas). Pulsa &quot;Conciliar&quot; para recortar el exceso.
+                </p>
+              </div>
+              <Button
+                onClick={handleReconcile}
+                loading={reconciling}
+                variant="outline"
+                fullWidth
+                className="text-red-400 border-red-900 hover:bg-red-950/30"
+              >
+                <RotateCcw size={13} />Conciliar ahora
+              </Button>
+            </div>
           )}
         </Card>
 
