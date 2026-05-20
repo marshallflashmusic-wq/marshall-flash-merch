@@ -26,6 +26,7 @@ import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
 import PacksManager, { type PacksManagerRef } from '@/components/PacksManager'
 import SwipeableTabs from '@/components/ui/SwipeableTabs'
+import { DEFAULT_WH_COLOR } from '@/lib/warehouseColors'
 import type { Product } from '@/types'
 
 type FilterStatus = 'all' | 'low_stock' | 'out_of_stock' | 'active' | 'inactive'
@@ -53,6 +54,10 @@ type EventAllocationGrouped = {
   quantity_remaining: number
 }
 
+type WarehouseInfo = { id: string; name: string; color: string | null }
+type WarehouseStockRow = { warehouse_id: string; product_id: string; variant_id: string | null; quantity: number }
+type WarehouseAllocation = { warehouse_id: string; warehouse_name: string; warehouse_color: string; variant_size: string | null; quantity: number }
+
 export default function InventoryPage() {
   const { user } = useAppStore()
   const { products, loading, refetch } = useAllProducts()
@@ -68,6 +73,8 @@ export default function InventoryPage() {
   const [saving, setSaving] = useState(false)
   const [orderError, setOrderError] = useState('')
   const [allocations, setAllocations] = useState<EventAllocation[]>([])
+  const [warehouses, setWarehouses] = useState<WarehouseInfo[]>([])
+  const [whStockRows, setWhStockRows] = useState<WarehouseStockRow[]>([])
 
   // Carga las asignaciones a eventos no cerrados, para mostrar pills bajo cada producto
   useEffect(() => {
@@ -83,6 +90,49 @@ export default function InventoryPage() {
     const interval = setInterval(load, 15_000)
     return () => clearInterval(interval)
   }, [])
+
+  // Carga almacenes + warehouse_stock para pintar pills coloreadas por producto
+  useEffect(() => {
+    const loadWh = async () => {
+      try {
+        const r = await fetch('/api/warehouses/overview', { cache: 'no-store' })
+        if (!r.ok) return
+        const j = await r.json()
+        setWarehouses((j.warehouses ?? []) as WarehouseInfo[])
+        setWhStockRows((j.stock ?? []) as WarehouseStockRow[])
+      } catch { /* silencioso */ }
+    }
+    loadWh()
+    const i = setInterval(loadWh, 20_000)
+    return () => clearInterval(i)
+  }, [])
+
+  // Mapa product_id → asignaciones agregadas por almacén (y por talla en textil)
+  const warehouseByProduct = useMemo(() => {
+    const whInfo = new Map(warehouses.map(w => [w.id, w]))
+    const map = new Map<string, WarehouseAllocation[]>()
+    for (const row of whStockRows) {
+      if (row.quantity <= 0) continue
+      const wh = whInfo.get(row.warehouse_id)
+      if (!wh) continue
+      // Para variantes obtenemos la talla del producto correspondiente
+      let size: string | null = null
+      if (row.variant_id) {
+        const p = products.find(pp => pp.id === row.product_id)
+        size = p?.variants?.find(v => v.id === row.variant_id)?.size ?? null
+      }
+      const list = map.get(row.product_id) ?? []
+      list.push({
+        warehouse_id: row.warehouse_id,
+        warehouse_name: wh.name,
+        warehouse_color: wh.color ?? DEFAULT_WH_COLOR,
+        variant_size: size,
+        quantity: row.quantity,
+      })
+      map.set(row.product_id, list)
+    }
+    return map
+  }, [warehouses, whStockRows, products])
 
   // Mapa product_id → asignaciones acumuladas por evento
   const allocationsByProduct = useMemo(() => {
@@ -383,6 +433,7 @@ export default function InventoryPage() {
                             product={product}
                             canReorder={canReorder}
                             allocations={allocationsByProduct.get(product.id) ?? []}
+                            warehouseAllocations={warehouseByProduct.get(product.id) ?? []}
                             onEdit={() => setEditProduct(product)}
                             onToggleActive={() => handleToggleActive(product)}
                             onStockDown={() => handleQuickStock(product, -1)}
@@ -681,10 +732,11 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
   )
 }
 
-function SortableProductCard({ product, canReorder, allocations, onEdit, onToggleActive, onStockDown, onStockUp }: {
+function SortableProductCard({ product, canReorder, allocations, warehouseAllocations, onEdit, onToggleActive, onStockDown, onStockUp }: {
   product: Product
   canReorder: boolean
   allocations: EventAllocationGrouped[]
+  warehouseAllocations: WarehouseAllocation[]
   onEdit: () => void
   onToggleActive: () => void
   onStockDown: () => void
@@ -767,30 +819,58 @@ function SortableProductCard({ product, canReorder, allocations, onEdit, onToggl
           </div>
 
           {/* Stock control — desactivado para textil (usar edición por talla) */}
-          <div className="flex items-center gap-1 shrink-0">
-            {product.variants && product.variants.length > 0 ? (
-              <span className={`text-xs font-bold px-2 ${isOutOfStock ? 'text-red-400' : isLowStock ? 'text-amber-400' : 'text-zinc-400'}`}>
-                {product.stock} uds
-              </span>
-            ) : (
-              <>
-                <button
-                  onClick={onStockDown}
-                  disabled={product.stock === 0}
-                  className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center disabled:opacity-30 active:scale-95 transition-transform"
-                >
-                  <Minus size={14} />
-                </button>
-                <span className={`w-8 text-center font-bold text-sm ${isOutOfStock ? 'text-red-400' : isLowStock ? 'text-amber-400' : 'text-white'}`}>
-                  {product.stock}
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <div className="flex items-center gap-1">
+              {product.variants && product.variants.length > 0 ? (
+                <span className={`text-xs font-bold px-2 ${isOutOfStock ? 'text-red-400' : isLowStock ? 'text-amber-400' : 'text-zinc-400'}`}>
+                  {product.stock} uds
                 </span>
-                <button
-                  onClick={onStockUp}
-                  className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center active:scale-95 transition-transform"
-                >
-                  <Plus size={14} />
-                </button>
-              </>
+              ) : (
+                <>
+                  <button
+                    onClick={onStockDown}
+                    disabled={product.stock === 0}
+                    className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center disabled:opacity-30 active:scale-95 transition-transform"
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <span className={`w-8 text-center font-bold text-sm ${isOutOfStock ? 'text-red-400' : isLowStock ? 'text-amber-400' : 'text-white'}`}>
+                    {product.stock}
+                  </span>
+                  <button
+                    onClick={onStockUp}
+                    className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center active:scale-95 transition-transform"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </>
+              )}
+            </div>
+            {/* Etiquetas de almacén con color */}
+            {warehouseAllocations.length > 0 && (
+              <div className="flex flex-wrap gap-1 justify-end max-w-[180px]">
+                {(() => {
+                  // Agrupar por almacén (suma cantidades de todas las tallas)
+                  const grouped = new Map<string, { name: string; color: string; total: number }>()
+                  for (const w of warehouseAllocations) {
+                    const cur = grouped.get(w.warehouse_id)
+                    if (cur) cur.total += w.quantity
+                    else grouped.set(w.warehouse_id, { name: w.warehouse_name, color: w.warehouse_color, total: w.quantity })
+                  }
+                  return Array.from(grouped.entries()).map(([id, v]) => (
+                    <span
+                      key={id}
+                      title={`${v.name}: ${v.total} ud`}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md border"
+                      style={{ backgroundColor: v.color + '22', borderColor: v.color + '99', color: v.color }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: v.color }} />
+                      <span className="truncate max-w-[80px]">{v.name}</span>
+                      <span style={{ color: v.color }}>·{v.total}</span>
+                    </span>
+                  ))
+                })()}
+              </div>
             )}
           </div>
         </div>

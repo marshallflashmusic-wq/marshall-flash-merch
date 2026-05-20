@@ -1,11 +1,11 @@
 'use client'
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import {
   ChevronLeft, Search, Package, Minus, Plus, AlertTriangle,
   CalendarDays, MapPin, Building2, Lock, Play, CheckCircle2, X, Check,
   Package2, Clock, Receipt, Banknote, CreditCard, Smartphone, Wallet,
-  Warehouse, EyeOff, Eye,
+  Warehouse,
 } from 'lucide-react'
 import { useAllProducts } from '@/hooks/useProducts'
 import { usePacks } from '@/hooks/usePacks'
@@ -45,43 +45,50 @@ export default function EventDetailPage() {
   const [closeLoading, setCloseLoading] = useState(false)
   const [closeError, setCloseError] = useState('')
 
-  // Selector de almacén origen para todas las asignaciones a este concierto.
-  // Persistido en localStorage para que aguante recargas.
-  const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>([])
-  const [warehouseId, setWarehouseId] = useState<string>('')
-  const [showWhPicker, setShowWhPicker] = useState<boolean>(true)
-  useEffect(() => {
-    fetch('/api/warehouses', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(j => {
-        const list = (j.warehouses ?? []) as { id: string; name: string }[]
-        setWarehouses(list)
-        // Si solo hay uno, lo dejamos preseleccionado y ocultamos el picker.
-        const saved = typeof window !== 'undefined' ? localStorage.getItem('event_assign_warehouse') : null
-        if (saved && list.some(w => w.id === saved)) setWarehouseId(saved)
-        else if (list.length > 0) setWarehouseId(list[0].id)
-        if (list.length <= 1) setShowWhPicker(false)
-        else {
-          const hidden = typeof window !== 'undefined' && localStorage.getItem('event_assign_hide_wh') === '1'
-          setShowWhPicker(!hidden)
-        }
-      })
-      .catch(() => {})
+  // Almacenes + warehouse_stock para mostrar chips por almacén en cada artículo.
+  type WhInfo = { id: string; name: string; color: string | null }
+  type WhStockRow = { warehouse_id: string; product_id: string; variant_id: string | null; quantity: number }
+  const [warehouses, setWarehouses] = useState<WhInfo[]>([])
+  const [whStock, setWhStock] = useState<WhStockRow[]>([])
+  // Checkbox "mostrar almacenes". Default: visible si hay >1 almacén.
+  const [showWh, setShowWh] = useState<boolean>(false)
+  const loadWh = useCallback(async () => {
+    try {
+      const r = await fetch('/api/warehouses/overview', { cache: 'no-store' })
+      if (!r.ok) return
+      const j = await r.json()
+      const list = (j.warehouses ?? []) as WhInfo[]
+      setWarehouses(list)
+      setWhStock((j.stock ?? []) as WhStockRow[])
+      // Inicializar visibilidad solo una vez (cuando aún no hay decisión guardada)
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('event_show_wh_chips') : null
+      if (saved === null) setShowWh(list.length > 1)
+      else setShowWh(saved === '1')
+    } catch { /* silencioso */ }
   }, [])
-  useEffect(() => {
-    if (warehouseId && typeof window !== 'undefined') {
-      localStorage.setItem('event_assign_warehouse', warehouseId)
-    }
-  }, [warehouseId])
-  const toggleWhPicker = () => {
-    setShowWhPicker(prev => {
+  useEffect(() => { loadWh() }, [loadWh])
+  const toggleShowWh = () => {
+    setShowWh(prev => {
       const next = !prev
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('event_assign_hide_wh', next ? '0' : '1')
-      }
+      if (typeof window !== 'undefined') localStorage.setItem('event_show_wh_chips', next ? '1' : '0')
       return next
     })
   }
+  // Map (product_id, variant_id|null) → lista de { wh, quantity }
+  const whAvailability = useMemo(() => {
+    const map = new Map<string, { wh: WhInfo; quantity: number }[]>()
+    const whInfo = new Map(warehouses.map(w => [w.id, w]))
+    for (const s of whStock) {
+      if (s.quantity <= 0) continue
+      const wh = whInfo.get(s.warehouse_id)
+      if (!wh) continue
+      const key = `${s.product_id}::${s.variant_id ?? ''}`
+      const list = map.get(key) ?? []
+      list.push({ wh, quantity: s.quantity })
+      map.set(key, list)
+    }
+    return map
+  }, [warehouses, whStock])
 
   useEffect(() => {
     if (!eventId) return
@@ -103,14 +110,24 @@ export default function EventDetailPage() {
   const getInv = (productId: string, variantId: string | null) =>
     invIndex.get(`${productId}::${variantId ?? ''}`)
 
-  const handleAdjust = async (productId: string, variantId: string | null, delta: number) => {
+  const handleAdjust = async (
+    productId: string,
+    variantId: string | null,
+    delta: number,
+    fromWarehouseId?: string | null,
+  ) => {
     const key = `${productId}::${variantId ?? ''}`
     setSavingMap(m => ({ ...m, [key]: true }))
     setErrorMap(m => ({ ...m, [key]: '' }))
-    const res = await adjust(productId, variantId, delta, warehouseId || null)
+    // Si no se pasa explícito y solo hay 1 almacén, usarlo por defecto.
+    const wh = fromWarehouseId ?? (warehouses.length === 1 ? warehouses[0].id : null)
+    const res = await adjust(productId, variantId, delta, wh)
     if (!res.success) {
       setErrorMap(m => ({ ...m, [key]: res.error ?? 'Error' }))
       setTimeout(() => setErrorMap(m => ({ ...m, [key]: '' })), 3000)
+    } else {
+      // Refrescar stock de almacenes para que los chips se actualicen
+      loadWh()
     }
     setSavingMap(m => ({ ...m, [key]: false }))
   }
@@ -186,10 +203,11 @@ export default function EventDetailPage() {
     setPackSavingMap(m => ({ ...m, [key]: true }))
     setPackErrorMap(m => ({ ...m, [key]: '' }))
     try {
+      const wh = warehouses.length === 1 ? warehouses[0].id : null
       const res = await fetch(`/api/events/${eventId}/inventory/pack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pack_id: pack.id, delta, warehouse_id: warehouseId || null }),
+        body: JSON.stringify({ pack_id: pack.id, delta, warehouse_id: wh }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Error')
@@ -249,44 +267,27 @@ export default function EventDetailPage() {
           <SummaryCell label="Restante" value={summary.totalRemaining} accent="text-amber-400" />
         </div>
 
-        {/* Selector de almacén origen */}
-        {isAdmin && !isClosed && warehouses.length > 0 && (
-          showWhPicker ? (
-            <div className="flex items-center gap-2 mt-3 bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-1.5">
-              <Warehouse size={14} className="text-zinc-500 shrink-0 ml-1" />
-              <span className="text-zinc-500 text-[11px] uppercase tracking-wide shrink-0">Origen</span>
-              <select
-                value={warehouseId}
-                onChange={e => setWarehouseId(e.target.value)}
-                className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded-lg py-1.5 px-2 text-white text-xs focus:outline-none focus:border-white"
-              >
-                {warehouses.map(w => (
-                  <option key={w.id} value={w.id}>{w.name}</option>
-                ))}
-              </select>
-              {warehouses.length > 1 && (
-                <button
-                  onClick={toggleWhPicker}
-                  title="Ocultar selector"
-                  className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 shrink-0"
-                >
-                  <EyeOff size={13} />
-                </button>
-              )}
-            </div>
-          ) : (
-            <button
-              onClick={toggleWhPicker}
-              className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300"
-            >
-              <Eye size={11} />Mostrar selector de almacén origen
-            </button>
-          )
-        )}
-
-        {/* Acciones */}
+        {/* Acciones: checkbox "Mostrar almacenes" + Activar/Cerrar */}
         {isAdmin && !isClosed && (
-          <div className="flex gap-2 mt-3">
+          <div className="flex items-center gap-2 mt-3">
+            {warehouses.length > 1 && (
+              <button
+                onClick={toggleShowWh}
+                title="Mostrar/ocultar almacenes"
+                className={`flex items-center gap-1.5 px-2.5 py-2 rounded-xl border text-xs font-medium transition-colors shrink-0 ${
+                  showWh
+                    ? 'border-white/30 bg-white/10 text-white'
+                    : 'border-zinc-800 bg-zinc-900 text-zinc-400'
+                }`}
+              >
+                <span className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                  showWh ? 'bg-white border-white' : 'border-zinc-500'
+                }`}>
+                  {showWh && <Check size={11} className="text-black" strokeWidth={3} />}
+                </span>
+                <Warehouse size={12} />Almacenes
+              </button>
+            )}
             {event.status === 'upcoming' && (
               <Button onClick={handleActivate} variant="outline" className="flex-1">
                 <Play size={14} />Activar
@@ -342,6 +343,8 @@ export default function EventDetailPage() {
                         errorMap={errorMap}
                         onAdjust={handleAdjust}
                         disabled={isClosed}
+                        showWh={showWh}
+                        whAvailability={whAvailability}
                       />
                     ) : (
                       <SimpleProductRow
@@ -350,8 +353,10 @@ export default function EventDetailPage() {
                         inv={getInv(product.id, null)}
                         saving={!!savingMap[`${product.id}::`]}
                         error={errorMap[`${product.id}::`] ?? ''}
-                        onAdjust={(delta) => handleAdjust(product.id, null, delta)}
+                        onAdjust={(delta, whId) => handleAdjust(product.id, null, delta, whId)}
                         disabled={isClosed}
+                        showWh={showWh}
+                        whAvailability={whAvailability.get(`${product.id}::`) ?? []}
                       />
                     )
                   })
@@ -583,14 +588,16 @@ function SummaryCell({ label, value, accent }: { label: string; value: number; a
 }
 
 function SimpleProductRow({
-  product, inv, saving, error, onAdjust, disabled,
+  product, inv, saving, error, onAdjust, disabled, showWh, whAvailability,
 }: {
   product: Product
   inv?: EventInventoryItem
   saving: boolean
   error: string
-  onAdjust: (delta: number) => void
+  onAdjust: (delta: number, warehouseId?: string | null) => void
   disabled: boolean
+  showWh: boolean
+  whAvailability: { wh: { id: string; name: string; color: string | null }; quantity: number }[]
 }) {
   const assigned = inv?.quantity_assigned ?? 0
   const sold = inv?.quantity_sold ?? 0
@@ -629,19 +636,51 @@ function SimpleProductRow({
           ><Plus size={14} strokeWidth={2.5} /></button>
         </div>
       </div>
+
+      {showWh && whAvailability.length > 0 && (
+        <div className="px-3 pb-3 pt-0 flex flex-wrap gap-1.5 border-t border-zinc-800">
+          {whAvailability.map(({ wh, quantity }) => {
+            const color = wh.color ?? '#71717a'
+            return (
+              <div
+                key={wh.id}
+                className="flex items-center gap-1 rounded-lg border px-1.5 py-1"
+                style={{ borderColor: color + '99', backgroundColor: color + '14' }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                <span className="text-[10px] font-semibold truncate max-w-[80px]" style={{ color }}>
+                  {wh.name}
+                </span>
+                <span className="text-[10px] text-zinc-500">·{quantity}</span>
+                <button
+                  disabled={disabled || saving}
+                  onClick={() => onAdjust(1, wh.id)}
+                  className="w-5 h-5 rounded-md bg-black/30 hover:bg-black/50 flex items-center justify-center disabled:opacity-30 ml-1"
+                  style={{ color }}
+                  title={`Sacar 1 de ${wh.name}`}
+                >
+                  <Plus size={10} strokeWidth={3} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </Card>
   )
 }
 
 function VariantProductRow({
-  product, getInv, savingMap, errorMap, onAdjust, disabled,
+  product, getInv, savingMap, errorMap, onAdjust, disabled, showWh, whAvailability,
 }: {
   product: Product
   getInv: (productId: string, variantId: string | null) => EventInventoryItem | undefined
   savingMap: Record<string, boolean>
   errorMap: Record<string, string>
-  onAdjust: (productId: string, variantId: string | null, delta: number) => void
+  onAdjust: (productId: string, variantId: string | null, delta: number, fromWarehouseId?: string | null) => void
   disabled: boolean
+  showWh: boolean
+  whAvailability: Map<string, { wh: { id: string; name: string; color: string | null }; quantity: number }[]>
 }) {
   const variants: ProductVariant[] = (product.variants ?? [])
     .slice()
@@ -673,6 +712,7 @@ function VariantProductRow({
             const key = `${product.id}::${v.id}`
             const saving = !!savingMap[key]
             const error = errorMap[key] ?? ''
+            const variantWhs = whAvailability.get(key) ?? []
             return (
               <div key={v.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-2">
                 <div className="flex items-center justify-between mb-1">
@@ -694,6 +734,30 @@ function VariantProductRow({
                 </div>
                 {sold > 0 && <p className="text-[10px] text-green-400 text-center mt-1">{sold} vendido{sold !== 1 ? 's' : ''}</p>}
                 {error && <p className="text-[10px] text-red-400 text-center mt-1">{error}</p>}
+                {showWh && variantWhs.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5 pt-1.5 border-t border-zinc-800">
+                    {variantWhs.map(({ wh, quantity }) => {
+                      const color = wh.color ?? '#71717a'
+                      return (
+                        <button
+                          key={wh.id}
+                          disabled={disabled || saving}
+                          onClick={() => onAdjust(product.id, v.id, 1, wh.id)}
+                          title={`Sacar 1 de ${wh.name}`}
+                          className="flex items-center gap-1 rounded-md border px-1 py-0.5 disabled:opacity-30 active:scale-95 transition-transform"
+                          style={{ borderColor: color + '99', backgroundColor: color + '14' }}
+                        >
+                          <span className="w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                          <span className="text-[9px] font-bold truncate max-w-[40px]" style={{ color }}>
+                            {wh.name}
+                          </span>
+                          <span className="text-[9px] text-zinc-500">·{quantity}</span>
+                          <Plus size={8} strokeWidth={3} style={{ color }} />
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )
           })}

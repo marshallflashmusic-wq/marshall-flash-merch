@@ -22,13 +22,18 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const supabase = getServiceClient()
   const body = await request.json()
-  const { name, notes } = body
+  const { name, notes, color } = body
   if (!name || !String(name).trim()) {
     return NextResponse.json({ error: 'Nombre obligatorio' }, { status: 400 })
   }
+  const insertData: Record<string, unknown> = {
+    name: String(name).trim(),
+    notes: notes ? String(notes).trim() : null,
+  }
+  if (typeof color === 'string' && color) insertData.color = color
   const { data, error } = await supabase
     .from('warehouses')
-    .insert({ name: String(name).trim(), notes: notes ? String(notes).trim() : null })
+    .insert(insertData)
     .select()
     .single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -40,7 +45,7 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json()
   const { id, ...patch } = body
   if (!id) return NextResponse.json({ error: 'id requerido' }, { status: 400 })
-  const allowed = ['name', 'notes', 'sort_order']
+  const allowed = ['name', 'notes', 'sort_order', 'color']
   const updateData: Record<string, unknown> = {}
   for (const k of allowed) {
     if (k in patch) updateData[k] = patch[k]

@@ -9,14 +9,17 @@ import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
+import { WAREHOUSE_COLORS, DEFAULT_WH_COLOR } from '@/lib/warehouseColors'
 
 interface Warehouse {
   id: string
   name: string
   notes: string | null
   sort_order: number
+  color: string | null
   created_at: string
 }
+
 
 interface Product {
   id: string
@@ -51,6 +54,7 @@ export default function WarehousesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createName, setCreateName] = useState('')
   const [createNotes, setCreateNotes] = useState('')
+  const [createColor, setCreateColor] = useState<string>(DEFAULT_WH_COLOR)
   const [creating, setCreating] = useState(false)
   const [createErr, setCreateErr] = useState('')
 
@@ -61,6 +65,16 @@ export default function WarehousesPage() {
 
   const [editWh, setEditWh] = useState<Warehouse | null>(null)
   const [editName, setEditName] = useState('')
+  const [editColor, setEditColor] = useState<string>(DEFAULT_WH_COLOR)
+
+  const [locateRow, setLocateRow] = useState<{
+    product_id: string; product_name: string; image_url: string | null;
+    variant_id: string | null; size: string | null; unassigned: number;
+  } | null>(null)
+  const [locateWhId, setLocateWhId] = useState<string>('')
+  const [locateQty, setLocateQty] = useState<number>(0)
+  const [locating, setLocating] = useState(false)
+  const [locateErr, setLocateErr] = useState('')
 
   const [assignWh, setAssignWh] = useState<Warehouse | null>(null)
   const [fillingId, setFillingId] = useState<string | null>(null)
@@ -140,11 +154,15 @@ export default function WarehousesPage() {
       const res = await fetch('/api/warehouses', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: createName.trim(), notes: createNotes.trim() || undefined }),
+        body: JSON.stringify({
+          name: createName.trim(),
+          notes: createNotes.trim() || undefined,
+          color: createColor || undefined,
+        }),
       })
       const j = await res.json()
       if (!res.ok) throw new Error(j.error ?? 'Error')
-      setCreateName(''); setCreateNotes('')
+      setCreateName(''); setCreateNotes(''); setCreateColor(DEFAULT_WH_COLOR)
       setCreateOpen(false)
       load()
     } catch (e) {
@@ -186,10 +204,52 @@ export default function WarehousesPage() {
     await fetch('/api/warehouses', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: editWh.id, name: editName.trim() }),
+      body: JSON.stringify({ id: editWh.id, name: editName.trim(), color: editColor }),
     })
     setEditWh(null)
     load()
+  }
+
+  const openLocate = (row: {
+    product_id: string; product_name: string; image_url: string | null;
+    variant_id: string | null; size: string | null; unassigned: number;
+  }) => {
+    setLocateRow(row)
+    setLocateQty(row.unassigned)
+    setLocateWhId(warehouses[0]?.id ?? '')
+    setLocateErr('')
+  }
+
+  const handleLocate = async () => {
+    if (!locateRow || !locateWhId || locateQty <= 0) return
+    setLocateErr('')
+    setLocating(true)
+    try {
+      // Calcular cantidad final en ese almacén = lo que ya tenga + locateQty
+      const current = stock.find(s =>
+        s.warehouse_id === locateWhId &&
+        s.product_id === locateRow.product_id &&
+        (s.variant_id ?? null) === (locateRow.variant_id ?? null)
+      )?.quantity ?? 0
+      const target = current + locateQty
+      const res = await fetch(`/api/warehouses/${locateWhId}/stock`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: locateRow.product_id,
+          variant_id: locateRow.variant_id ?? null,
+          quantity: target,
+        }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Error')
+      setLocateRow(null)
+      load()
+    } catch (e) {
+      setLocateErr(e instanceof Error ? e.message : 'Error de red')
+    } finally {
+      setLocating(false)
+    }
   }
 
   const handleReconcile = async () => {
@@ -338,11 +398,20 @@ export default function WarehousesPage() {
             return (
               <Card key={wh.id} padding="none">
                 <div className="p-3 flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-xl bg-zinc-800 flex items-center justify-center shrink-0">
-                    <Warehouse size={20} className="text-zinc-300" />
+                  <div
+                    className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ backgroundColor: (wh.color ?? DEFAULT_WH_COLOR) + '33', borderColor: wh.color ?? DEFAULT_WH_COLOR, borderWidth: 1 }}
+                  >
+                    <Warehouse size={20} style={{ color: wh.color ?? DEFAULT_WH_COLOR }} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-white font-bold text-sm">{wh.name}</p>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-block w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: wh.color ?? DEFAULT_WH_COLOR }}
+                      />
+                      <p className="text-white font-bold text-sm truncate">{wh.name}</p>
+                    </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                       <span className="text-zinc-500 text-xs">{units} unidades</span>
                       <span className="text-zinc-700 text-xs">·</span>
@@ -351,7 +420,7 @@ export default function WarehousesPage() {
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button
-                      onClick={() => { setEditWh(wh); setEditName(wh.name) }}
+                      onClick={() => { setEditWh(wh); setEditName(wh.name); setEditColor(wh.color ?? DEFAULT_WH_COLOR) }}
                       className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white"
                     >
                       <Edit2 size={13} />
@@ -408,6 +477,7 @@ export default function WarehousesPage() {
             placeholder="Ej: Local ensayo, Casa Juan, Oficina..."
             autoFocus
           />
+          <ColorPicker label="Color" value={createColor} onChange={setCreateColor} />
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-zinc-300">Notas</label>
             <textarea
@@ -460,7 +530,7 @@ export default function WarehousesPage() {
       </Modal>
 
       {/* Modal editar almacén */}
-      <Modal open={!!editWh} onClose={() => setEditWh(null)} title="Editar almacén" size="sm">
+      <Modal open={!!editWh} onClose={() => setEditWh(null)} title="Editar almacén" size="md">
         <div className="space-y-4">
           <Input
             label="Nombre"
@@ -468,6 +538,7 @@ export default function WarehousesPage() {
             onChange={e => setEditName(e.target.value)}
             autoFocus
           />
+          <ColorPicker label="Color" value={editColor} onChange={setEditColor} />
           <div className="flex gap-2">
             <Button variant="outline" fullWidth onClick={() => setEditWh(null)}>Cancelar</Button>
             <Button fullWidth onClick={handleEditSave}>Guardar</Button>
@@ -485,10 +556,18 @@ export default function WarehousesPage() {
         ) : (
           <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
             <p className="text-zinc-500 text-xs">
-              Estos artículos tienen unidades que aún no están en ningún almacén. Asígnalos manualmente o usa &quot;Añadir todo el stock&quot; desde un almacén.
+              Pulsa un artículo para ubicarlo en uno de tus almacenes.
             </p>
+            {warehouses.length === 0 && (
+              <p className="text-amber-400 text-xs">Aún no hay almacenes. Crea uno primero.</p>
+            )}
             {unassignedRows.map((r, idx) => (
-              <div key={`${r.product_id}-${r.variant_id ?? 'none'}-${idx}`} className="flex items-center gap-3 bg-zinc-800/50 border border-zinc-800 rounded-xl p-2.5">
+              <button
+                key={`${r.product_id}-${r.variant_id ?? 'none'}-${idx}`}
+                onClick={() => warehouses.length > 0 && openLocate(r)}
+                disabled={warehouses.length === 0}
+                className="w-full flex items-center gap-3 bg-zinc-800/50 hover:bg-zinc-800 active:scale-[0.99] border border-zinc-800 rounded-xl p-2.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-left"
+              >
                 <div className="w-10 h-10 rounded-lg bg-zinc-800 overflow-hidden shrink-0">
                   {r.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -504,8 +583,81 @@ export default function WarehousesPage() {
                 <span className="bg-amber-500 text-black text-xs font-black px-2 py-1 rounded-lg shrink-0">
                   +{r.unassigned}
                 </span>
-              </div>
+                <ChevronDown size={14} className="text-zinc-500 shrink-0 -rotate-90" />
+              </button>
             ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* Sub-modal: ubicar artículo concreto en almacén */}
+      <Modal open={!!locateRow} onClose={() => !locating && setLocateRow(null)} title="Ubicar en almacén" size="sm">
+        {locateRow && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 bg-zinc-800/60 rounded-xl p-2.5">
+              <div className="w-10 h-10 rounded-lg bg-zinc-800 overflow-hidden shrink-0">
+                {locateRow.image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={locateRow.image_url} alt={locateRow.product_name} className="w-full h-full object-cover" />
+                ) : <div className="w-full h-full flex items-center justify-center"><Package size={16} className="text-zinc-600" /></div>}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-semibold truncate">{locateRow.product_name}</p>
+                <p className="text-zinc-500 text-xs">
+                  {locateRow.size ? `Talla ${locateRow.size} · ` : ''}{locateRow.unassigned} ud sin ubicar
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-zinc-400">Almacén</label>
+              <div className="grid grid-cols-1 gap-1.5 max-h-40 overflow-y-auto">
+                {warehouses.map(w => (
+                  <button
+                    key={w.id}
+                    type="button"
+                    onClick={() => setLocateWhId(w.id)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-colors text-left ${
+                      locateWhId === w.id
+                        ? 'border-white bg-white/5'
+                        : 'border-zinc-700 hover:border-zinc-500'
+                    }`}
+                  >
+                    <span
+                      className="w-3 h-3 rounded-full shrink-0"
+                      style={{ backgroundColor: w.color ?? DEFAULT_WH_COLOR }}
+                    />
+                    <span className="text-white text-sm">{w.name}</span>
+                    {locateWhId === w.id && <Check size={14} className="ml-auto text-white" strokeWidth={3} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-zinc-400">Unidades a ubicar (máx {locateRow.unassigned})</label>
+              <input
+                type="number"
+                min={1}
+                max={locateRow.unassigned}
+                value={locateQty}
+                onChange={e => setLocateQty(Math.max(1, Math.min(locateRow.unassigned, parseInt(e.target.value) || 0)))}
+                className="bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white text-sm focus:outline-none focus:border-white"
+              />
+            </div>
+
+            {locateErr && (
+              <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2">
+                <p className="text-red-400 text-sm">{locateErr}</p>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button variant="outline" fullWidth onClick={() => setLocateRow(null)} disabled={locating}>Cancelar</Button>
+              <Button fullWidth onClick={handleLocate} loading={locating} disabled={!locateWhId || locateQty <= 0}>
+                <Check size={14} />Ubicar
+              </Button>
+            </div>
           </div>
         )}
       </Modal>
@@ -521,6 +673,33 @@ export default function WarehousesPage() {
           onSaved={() => { load() }}
         />
       )}
+    </div>
+  )
+}
+
+function ColorPicker({ label, value, onChange }: { label?: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {label && <label className="text-sm font-medium text-zinc-300">{label}</label>}
+      <div className="grid grid-cols-6 gap-2">
+        {WAREHOUSE_COLORS.map(c => (
+          <button
+            key={c.hex}
+            type="button"
+            onClick={() => onChange(c.hex)}
+            title={c.name}
+            className={`relative h-9 rounded-lg transition-all ${
+              value === c.hex ? 'ring-2 ring-white ring-offset-2 ring-offset-zinc-900' : 'hover:opacity-80'
+            }`}
+            style={{ backgroundColor: c.hex }}
+            aria-label={c.name}
+          >
+            {value === c.hex && (
+              <Check size={14} className="absolute inset-0 m-auto text-white" strokeWidth={3} />
+            )}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
