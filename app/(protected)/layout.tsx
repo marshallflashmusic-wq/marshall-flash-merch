@@ -1,5 +1,6 @@
 import BottomNav from '@/components/layout/BottomNav'
 import SessionProvider from '@/components/providers/SessionProvider'
+import HelpRequestsListener from '@/components/providers/HelpRequestsListener'
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -9,6 +10,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
           {children}
         </main>
         <BottomNav />
+        <HelpRequestsListener />
       </div>
     </SessionProvider>
   )

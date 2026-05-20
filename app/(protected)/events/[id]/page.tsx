@@ -40,7 +40,7 @@ export default function EventDetailPage() {
   const [packSavingMap, setPackSavingMap] = useState<Record<string, boolean>>({})
   const [packErrorMap, setPackErrorMap] = useState<Record<string, string>>({})
   const [closeOpen, setCloseOpen] = useState(false)
-  const [closeResult, setCloseResult] = useState<{ units_returned: number; units_sold: number; lines: number } | null>(null)
+  const [closeResult, setCloseResult] = useState<{ units_released: number; units_sold: number; lines: number } | null>(null)
   const [closeLoading, setCloseLoading] = useState(false)
   const [closeError, setCloseError] = useState('')
 
@@ -169,7 +169,7 @@ export default function EventDetailPage() {
       <div className="h-full flex items-center justify-center">
         {loadingInv || loadingProducts
           ? <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-          : <p className="text-zinc-500 text-sm">Evento no encontrado</p>}
+          : <p className="text-zinc-500 text-sm">Concierto no encontrado</p>}
       </div>
     )
   }
@@ -220,7 +220,7 @@ export default function EventDetailPage() {
             )}
             {event.status === 'active' && (
               <Button onClick={() => { setCloseError(''); setCloseResult(null); setCloseOpen(true) }} variant="outline" className="flex-1 text-amber-400 border-amber-900 hover:bg-amber-950/30">
-                <Lock size={14} />Cerrar evento
+                <Lock size={14} />Cerrar concierto
               </Button>
             )}
           </div>
@@ -326,20 +326,20 @@ export default function EventDetailPage() {
         ]}
       />
 
-      {/* Modal cerrar evento */}
-      <Modal open={closeOpen} onClose={() => setCloseOpen(false)} title="Cerrar evento" size="md">
+      {/* Modal cerrar concierto */}
+      <Modal open={closeOpen} onClose={() => setCloseOpen(false)} title="Cerrar concierto" size="md">
         {closeResult ? (
           <div className="space-y-4">
             <div className="flex flex-col items-center gap-3 py-2">
               <div className="w-14 h-14 rounded-full bg-green-500/15 border border-green-700 flex items-center justify-center">
                 <CheckCircle2 size={28} className="text-green-500" />
               </div>
-              <p className="text-white font-bold">Evento cerrado correctamente</p>
+              <p className="text-white font-bold">Concierto cerrado correctamente</p>
             </div>
             <div className="grid grid-cols-3 gap-2">
               <SummaryCell label="Líneas" value={closeResult.lines} />
               <SummaryCell label="Vendidas" value={closeResult.units_sold} accent="text-green-400" />
-              <SummaryCell label="Devueltas" value={closeResult.units_returned} accent="text-amber-400" />
+              <SummaryCell label="Liberadas" value={closeResult.units_released} accent="text-amber-400" />
             </div>
             <Button fullWidth onClick={() => { setCloseOpen(false); router.push('/events') }}>Volver al listado</Button>
           </div>
@@ -348,7 +348,7 @@ export default function EventDetailPage() {
             <div className="flex items-start gap-2 bg-amber-950/40 border border-amber-900 rounded-xl p-3">
               <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
               <p className="text-amber-300 text-sm">
-                Al cerrar, las <span className="font-bold">{summary.totalRemaining}</span> unidades NO vendidas se devolverán automáticamente al stock global. Las ventas registradas quedan ligadas al evento para histórico.
+                Al cerrar, las <span className="font-bold">{summary.totalRemaining}</span> unidades NO vendidas dejan de estar reservadas y vuelven al inventario disponible. Las ventas registradas quedan ligadas al concierto para histórico.
               </p>
             </div>
             {closeError && <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2"><p className="text-red-400 text-sm">{closeError}</p></div>}
@@ -385,7 +385,7 @@ function EventSalesPanel({ sales, loading }: { sales: Sale[]; loading: boolean }
   if (sales.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-zinc-600 mt-3">
-        <Clock size={36} /><p className="mt-2 text-sm">Sin ventas en este evento todavía</p>
+        <Clock size={36} /><p className="mt-2 text-sm">Sin ventas en este concierto todavía</p>
       </div>
     )
   }

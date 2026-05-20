@@ -802,7 +802,7 @@ function SortableProductCard({ product, canReorder, allocations, onEdit, onToggl
               <span
                 key={`${a.event_id}-${a.variant_size ?? 'all'}-${i}`}
                 className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-700/60"
-                title={`${a.event_name} · ${a.quantity_remaining} ud${a.quantity_remaining !== 1 ? 's' : ''} reservadas en el evento`}
+                title={`${a.event_name} · ${a.quantity_remaining} ud${a.quantity_remaining !== 1 ? 's' : ''} reservadas en el concierto`}
               >
                 <CalendarDays size={9} className="text-amber-400" />
                 <span className="truncate max-w-[120px]">{a.event_name}</span>

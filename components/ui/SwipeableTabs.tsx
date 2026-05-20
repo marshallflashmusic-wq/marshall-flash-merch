@@ -1,5 +1,5 @@
 'use client'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 interface SwipeableTab {
   key: string
@@ -12,8 +12,8 @@ interface Props {
   activeKey: string
   onChange: (key: string) => void
   tabBarClassName?: string
-  panelClassName?: string   // clase extra para cada panel (p.ej. padding)
-  swipeDisabled?: boolean   // bloquea swipe horizontal (ej.: modal abierto)
+  panelClassName?: string
+  swipeDisabled?: boolean
 }
 
 export default function SwipeableTabs({
@@ -30,9 +30,15 @@ export default function SwipeableTabs({
   const [dragX, setDragX] = useState(0)
   const [dragging, setDragging] = useState(false)
 
-  const startX   = useRef<number | null>(null)
-  const startY   = useRef<number | null>(null)
-  const dir      = useRef<'h' | 'v' | null>(null)  // dirección detectada
+  const startX = useRef<number | null>(null)
+  const startY = useRef<number | null>(null)
+  const dir    = useRef<'h' | 'v' | null>(null)
+
+  const areaRef = useRef<HTMLDivElement | null>(null)
+
+  // Estado mutable accesible desde los listeners no-React (passive:false).
+  const stateRef = useRef({ swipeDisabled, currentIndex, n })
+  stateRef.current = { swipeDisabled, currentIndex, n }
 
   const reset = () => {
     startX.current = null
@@ -42,58 +48,80 @@ export default function SwipeableTabs({
     setDragging(false)
   }
 
-  // Si hay un Modal abierto, document.body.style.overflow === 'hidden'.
-  // En ese caso ignoramos el swipe (evita que el usuario cambie de tab
-  // mientras está rellenando un formulario en un modal).
   const isModalOpen = () =>
     typeof document !== 'undefined' && document.body.style.overflow === 'hidden'
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (swipeDisabled || isModalOpen()) return
-    startX.current = e.touches[0].clientX
-    startY.current = e.touches[0].clientY
-    dir.current    = null
-  }
+  // Listeners manuales con { passive: false } para que preventDefault sí frene
+  // el scroll vertical del navegador cuando detectamos un swipe horizontal.
+  useEffect(() => {
+    const el = areaRef.current
+    if (!el) return
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (swipeDisabled || isModalOpen()) return
-    if (startX.current === null || startY.current === null) return
-    const dx = e.touches[0].clientX - startX.current
-    const dy = e.touches[0].clientY - startY.current
-
-    // Decidir dirección en el primer movimiento significativo
-    if (dir.current === null) {
-      if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return
-      dir.current = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v'
+    const onTouchStart = (e: TouchEvent) => {
+      if (stateRef.current.swipeDisabled || isModalOpen()) return
+      startX.current = e.touches[0].clientX
+      startY.current = e.touches[0].clientY
+      dir.current    = null
     }
 
-    if (dir.current !== 'h') return   // scroll vertical → no interferir
-    e.preventDefault()                 // bloquear scroll mientras deslizamos
+    const onTouchMove = (e: TouchEvent) => {
+      if (stateRef.current.swipeDisabled || isModalOpen()) return
+      if (startX.current === null || startY.current === null) return
+      const dx = e.touches[0].clientX - startX.current
+      const dy = e.touches[0].clientY - startY.current
 
-    setDragging(true)
+      // Decidir dirección con un umbral pequeño y favoreciendo el horizontal:
+      // si el desplazamiento horizontal supera al vertical más un margen,
+      // tratamos el gesto como swipe.
+      if (dir.current === null) {
+        if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return
+        dir.current = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v'
+      }
 
-    // Efecto rubber-band en los extremos
-    const atStart = currentIndex === 0 && dx > 0
-    const atEnd   = currentIndex === n - 1 && dx < 0
-    setDragX(atStart || atEnd ? dx * 0.15 : dx)
-  }
+      if (dir.current !== 'h') return
 
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (swipeDisabled) { reset(); return }
-    if (!dragging) { reset(); return }
+      // Bloquear scroll vertical del body durante el slide horizontal.
+      if (e.cancelable) e.preventDefault()
 
-    const dx = e.changedTouches[0].clientX - (startX.current ?? 0)
-    const threshold = 55  // px mínimos para cambiar de tab
+      setDragging(true)
 
-    if      (dx < -threshold && currentIndex < n - 1) onChange(tabs[currentIndex + 1].key)
-    else if (dx >  threshold && currentIndex > 0)      onChange(tabs[currentIndex - 1].key)
+      const { currentIndex: idx, n: total } = stateRef.current
+      const atStart = idx === 0 && dx > 0
+      const atEnd   = idx === total - 1 && dx < 0
+      setDragX(atStart || atEnd ? dx * 0.15 : dx)
+    }
 
-    reset()
-  }
+    const onTouchEnd = (e: TouchEvent) => {
+      if (stateRef.current.swipeDisabled) { reset(); return }
+      const wasDragging = dir.current === 'h'
+      if (!wasDragging) { reset(); return }
 
-  // translateX del slider:
-  //   -currentIndex/n * 100%  →  posición base del tab activo
-  //   + dragX px              →  offset de arrastre en tiempo real
+      const dx = e.changedTouches[0].clientX - (startX.current ?? 0)
+      const threshold = 55
+      const { currentIndex: idx, n: total } = stateRef.current
+
+      if      (dx < -threshold && idx < total - 1) onChange(tabs[idx + 1].key)
+      else if (dx >  threshold && idx > 0)         onChange(tabs[idx - 1].key)
+
+      reset()
+    }
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true })
+    el.addEventListener('touchmove',  onTouchMove,  { passive: false })
+    el.addEventListener('touchend',   onTouchEnd,   { passive: true })
+    el.addEventListener('touchcancel', onTouchEnd,  { passive: true })
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove',  onTouchMove)
+      el.removeEventListener('touchend',   onTouchEnd)
+      el.removeEventListener('touchcancel', onTouchEnd)
+    }
+    // tabs/onChange capturados al montar; cambios de tabs no son críticos
+    // porque siempre leemos via stateRef o tabs en cierre. Para minimizar
+    // re-attachments, solo re-attachamos cuando cambia la cantidad de tabs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs.length])
+
   const sliderStyle: React.CSSProperties = {
     width:      `${n * 100}%`,
     transform:  `translateX(calc(${-(currentIndex / n) * 100}% + ${dragX}px))`,
@@ -112,7 +140,6 @@ export default function SwipeableTabs({
   return (
     <div className="flex flex-col h-full min-h-0">
 
-      {/* Barra de tabs con indicador animado */}
       <div className={`relative flex shrink-0 border-b border-zinc-800 bg-zinc-950 ${tabBarClassName}`}>
         {tabs.map(tab => (
           <button
@@ -125,22 +152,18 @@ export default function SwipeableTabs({
             {tab.label}
           </button>
         ))}
-        {/* Línea indicadora que se mueve suavemente */}
         <div
           className="absolute bottom-0 left-0 h-0.5 bg-white rounded-full"
           style={indicatorStyle}
         />
       </div>
 
-      {/* Área deslizable. `touch-action: pan-y` permite scroll vertical dentro de
-          los paneles pero bloquea gestos horizontales del navegador (back/forward
-          swipe). `overscroll-contain` evita que el scroll se filtre al body. */}
+      {/* Área deslizable. touch-action:pan-y permite scroll vertical natural
+          hasta que detectamos un swipe horizontal y llamamos preventDefault. */}
       <div
+        ref={areaRef}
         className="flex-1 min-h-0 overflow-hidden overscroll-contain"
         style={{ touchAction: 'pan-y' }}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
       >
         <div style={sliderStyle}>
           {tabs.map(tab => (

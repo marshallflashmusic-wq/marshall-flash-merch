@@ -8,17 +8,20 @@ import {
   Clock,
   Settings,
   CalendarDays,
+  HelpCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store/appStore'
 
+// 7 items con Vender (primary) en posición 4 → queda centrado en el bottom nav.
 const adminNav = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Inicio' },
-  { href: '/events', icon: CalendarDays, label: 'Eventos' },
-  { href: '/inventory', icon: Package, label: 'Stock global' },
+  { href: '/events', icon: CalendarDays, label: 'Conciertos' },
+  { href: '/inventory', icon: Package, label: 'Stock' },
   { href: '/sales/new', icon: ShoppingCart, label: 'Vender', primary: true },
   { href: '/sales/history', icon: Clock, label: 'Ventas' },
   { href: '/settings', icon: Settings, label: 'Config' },
+  { href: '/help', icon: HelpCircle, label: 'Ayuda' },
 ]
 
 const saleModeNav = [

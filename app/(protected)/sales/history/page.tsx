@@ -10,6 +10,7 @@ import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
+import SwipeableTabs from '@/components/ui/SwipeableTabs'
 import type { Sale, PaymentMethod, SaleFilters } from '@/types'
 
 type ScopeTab = 'all' | 'events' | 'quick'
@@ -67,27 +68,6 @@ export default function SalesHistoryPage() {
   const sales = skipFetch ? [] : rawSales
   const total = skipFetch ? 0 : rawTotal
   const [scope, setScope] = useState<ScopeTab>('all')
-
-  const scopedSales = useMemo(() => {
-    // TPV: scope fijo a "evento". Defensa en profundidad por si la API devolviera
-    // algo sin event_id pese al filtro.
-    if (isSaleMode) return sales.filter(s => !!s.event_id)
-    if (scope === 'events') return sales.filter(s => !!s.event_id)
-    if (scope === 'quick')  return sales.filter(s => !s.event_id)
-    return sales
-  }, [sales, scope, isSaleMode])
-
-  // Agrupado por evento para la pestaña "En eventos"
-  const groupedByEvent = useMemo(() => {
-    if (scope !== 'events') return [] as { event: Sale['event']; sales: Sale[] }[]
-    const map = new Map<string, { event: Sale['event']; sales: Sale[] }>()
-    for (const s of scopedSales) {
-      const key = s.event_id ?? '__none__'
-      if (!map.has(key)) map.set(key, { event: s.event, sales: [] })
-      map.get(key)!.sales.push(s)
-    }
-    return Array.from(map.values())
-  }, [scopedSales, scope])
 
   const eventCount = useMemo(() => sales.filter(s => !!s.event_id).length, [sales])
   const quickCount = useMemo(() => sales.filter(s => !s.event_id).length, [sales])
@@ -174,12 +154,9 @@ export default function SalesHistoryPage() {
     }
   }
 
-  const totalRevenue = scopedSales.reduce((a, s) => a + s.total_amount, 0)
-  const totalProfit = scopedSales.reduce((a, s) => a + s.profit, 0)
-
   const exportCSV = () => {
     const rows = [
-      ['Fecha', 'Hora', 'Evento', 'Vendedor', 'Método', 'Total', 'Beneficio', 'Productos', 'Notas'],
+      ['Fecha', 'Hora', 'Concierto', 'Vendedor', 'Método', 'Total', 'Beneficio', 'Productos', 'Notas'],
       ...sales.map(s => [
         new Date(s.created_at).toLocaleDateString('es-ES'),
         new Date(s.created_at).toLocaleTimeString('es-ES'),
@@ -224,31 +201,6 @@ export default function SalesHistoryPage() {
         }
       />
 
-      {/* Pestañas Total / Eventos / Rápidas — ocultas en TPV: el invitado solo
-          ve ventas del evento activo. */}
-      {!isSaleMode && (
-        <div className="px-4 pt-3 pb-1 shrink-0">
-          <div className="flex bg-zinc-900 border border-zinc-800 rounded-xl p-1 gap-1">
-            {([
-              { key: 'all', label: 'Totales', count: sales.length },
-              { key: 'events', label: 'En eventos', count: eventCount },
-              { key: 'quick', label: 'Rápidas', count: quickCount },
-            ] as { key: ScopeTab; label: string; count: number }[]).map(t => (
-              <button
-                key={t.key}
-                onClick={() => setScope(t.key)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  scope === t.key ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                {t.label}
-                {t.count > 0 && <span className={`ml-1.5 text-[10px] ${scope === t.key ? 'text-black/60' : 'text-zinc-500'}`}>{t.count}</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* TPV: banner con el evento activo. Si no hay, aviso. */}
       {isSaleMode && (
         <div className="px-4 pt-3 shrink-0">
@@ -262,103 +214,49 @@ export default function SalesHistoryPage() {
           ) : (
             <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
               <CalendarDays size={14} className="text-zinc-500 shrink-0" />
-              <p className="text-zinc-400 text-xs">Selecciona un evento en el TPV para ver su historial.</p>
+              <p className="text-zinc-400 text-xs">Selecciona un concierto en el TPV para ver su historial.</p>
             </div>
           )}
         </div>
       )}
 
-      {/* Resumen */}
-      {scopedSales.length > 0 && (
-        <div className={`grid gap-2 px-4 pt-3 shrink-0 ${isSaleMode ? 'grid-cols-2' : 'grid-cols-3'}`}>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
-            <p className="text-zinc-500 text-xs">Ventas</p>
-            <p className="text-white font-black text-lg">{scopedSales.length}</p>
-          </div>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
-            <p className="text-zinc-500 text-xs">Ingresos</p>
-            <p className="text-white font-black text-sm">{formatCurrency(totalRevenue)}</p>
-          </div>
-          {!isSaleMode && (
-            <div className={`border rounded-xl p-3 text-center ${totalProfit < 0 ? 'bg-red-950/30 border-red-900/50' : 'bg-zinc-900 border-zinc-800'}`}>
-              <p className="text-zinc-500 text-xs">Beneficio</p>
-              <p className={`font-black text-sm ${totalProfit < 0 ? 'text-red-400' : 'text-green-400'}`}>{formatCurrency(totalProfit)}</p>
-            </div>
-          )}
-        </div>
+      {/* Admin: tabs deslizables (Totales / En conciertos / Rápidas). TPV: lista directa. */}
+      {isSaleMode ? (
+        <ScopeContent
+          panelScope="events"
+          sales={sales}
+          loading={loading}
+          isSaleMode
+          filters={filters}
+          clearFilters={() => setFilters({})}
+          deletingId={deletingId}
+          onSelect={(s) => setSelectedSale(s)}
+          onEdit={openEdit}
+          onDelete={handleDelete}
+        />
+      ) : (
+        <SwipeableTabs
+          activeKey={scope}
+          onChange={k => setScope(k as ScopeTab)}
+          tabs={[
+            { key: 'all',    label: <TabLabel text="Totales"        count={sales.length} active={scope === 'all'} />,    content: (
+              <ScopeContent panelScope="all"    sales={sales} loading={loading} isSaleMode={false}
+                filters={filters} clearFilters={() => setFilters({})}
+                deletingId={deletingId} onSelect={(s) => setSelectedSale(s)} onEdit={openEdit} onDelete={handleDelete} />
+            )},
+            { key: 'events', label: <TabLabel text="En conciertos"  count={eventCount}   active={scope === 'events'} />, content: (
+              <ScopeContent panelScope="events" sales={sales} loading={loading} isSaleMode={false}
+                filters={filters} clearFilters={() => setFilters({})}
+                deletingId={deletingId} onSelect={(s) => setSelectedSale(s)} onEdit={openEdit} onDelete={handleDelete} />
+            )},
+            { key: 'quick',  label: <TabLabel text="Rápidas"        count={quickCount}   active={scope === 'quick'} />,  content: (
+              <ScopeContent panelScope="quick"  sales={sales} loading={loading} isSaleMode={false}
+                filters={filters} clearFilters={() => setFilters({})}
+                deletingId={deletingId} onSelect={(s) => setSelectedSale(s)} onEdit={openEdit} onDelete={handleDelete} />
+            )},
+          ]}
+        />
       )}
-
-      {/* Filtros activos */}
-      {Object.keys(filters).length > 0 && (
-        <div className="px-4 pt-2 shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-zinc-500">Filtros activos:</span>
-            <button
-              onClick={() => setFilters({})}
-              className="flex items-center gap-1 text-xs text-white hover:text-zinc-300"
-            >
-              <X size={12} />
-              Limpiar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Lista */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          </div>
-        ) : scopedSales.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-zinc-600">
-            <Clock size={40} />
-            <p className="mt-3 text-sm">
-              {scope === 'events' ? 'No hay ventas en eventos' : scope === 'quick' ? 'No hay ventas rápidas' : 'No hay ventas registradas'}
-            </p>
-          </div>
-        ) : scope === 'events' ? (
-          // Agrupado por evento
-          groupedByEvent.map(group => {
-            const groupRevenue = group.sales.reduce((a, s) => a + s.total_amount, 0)
-            return (
-              <div key={group.event?.id ?? '__none__'} className="space-y-2">
-                <div className="flex items-center gap-2 pt-2 pb-1">
-                  <CalendarDays size={14} className="text-amber-500" />
-                  <p className="text-white font-bold text-sm flex-1 truncate">
-                    {group.event?.name ?? 'Evento eliminado'}
-                  </p>
-                  <span className="text-amber-400 text-xs font-semibold">{formatCurrency(groupRevenue)}</span>
-                  <span className="text-zinc-500 text-xs">· {group.sales.length} venta{group.sales.length !== 1 ? 's' : ''}</span>
-                </div>
-                {group.sales.map(sale => (
-                  <SaleRow
-                    key={sale.id}
-                    sale={sale}
-                    isSaleMode={isSaleMode}
-                    deletingId={deletingId}
-                    onSelect={() => setSelectedSale(sale)}
-                    onEdit={() => openEdit(sale)}
-                    onDelete={() => handleDelete(sale)}
-                  />
-                ))}
-              </div>
-            )
-          })
-        ) : (
-          scopedSales.map(sale => (
-            <SaleRow
-              key={sale.id}
-              sale={sale}
-              isSaleMode={isSaleMode}
-              deletingId={deletingId}
-              onSelect={() => setSelectedSale(sale)}
-              onEdit={() => openEdit(sale)}
-              onDelete={() => handleDelete(sale)}
-            />
-          ))
-        )}
-      </div>
 
       {/* Modal detalle */}
       <Modal open={!!selectedSale} onClose={() => setSelectedSale(null)} title="Detalle de venta" size="md">
@@ -387,7 +285,7 @@ export default function SalesHistoryPage() {
               </div>
               {selectedSale.event && (
                 <div className="flex justify-between py-1 border-b border-zinc-800">
-                  <span className="text-zinc-500">Evento</span>
+                  <span className="text-zinc-500">Concierto</span>
                   <span className="text-white">{selectedSale.event.name}</span>
                 </div>
               )}
@@ -609,13 +507,13 @@ export default function SalesHistoryPage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm text-zinc-400">Evento</label>
+            <label className="text-sm text-zinc-400">Concierto</label>
             <select
               value={filters.event_id ?? ''}
               onChange={e => setFilters(f => ({ ...f, event_id: e.target.value || undefined }))}
               className="bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white text-sm focus:outline-none focus:border-white"
             >
-              <option value="">Todos los eventos</option>
+              <option value="">Todos los conciertos</option>
               {events.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
           </div>
@@ -759,5 +657,150 @@ function SaleRow({
         </div>
       )}
     </Card>
+  )
+}
+
+function TabLabel({ text, count, active }: { text: string; count: number; active: boolean }) {
+  return (
+    <span className="inline-flex items-center justify-center gap-1.5">
+      {text}
+      {count > 0 && (
+        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-white/15 text-white' : 'bg-zinc-800 text-zinc-500'}`}>
+          {count}
+        </span>
+      )}
+    </span>
+  )
+}
+
+// Renderiza resumen + lista filtrados por scope. Cada panel del slide lo usa
+// con un panelScope distinto, así el slide horizontal cambia el contenido.
+function ScopeContent({
+  panelScope, sales, loading, isSaleMode,
+  filters, clearFilters,
+  deletingId, onSelect, onEdit, onDelete,
+}: {
+  panelScope: ScopeTab
+  sales: Sale[]
+  loading: boolean
+  isSaleMode: boolean
+  filters: SaleFilters
+  clearFilters: () => void
+  deletingId: string | null
+  onSelect: (s: Sale) => void
+  onEdit: (s: Sale) => void
+  onDelete: (s: Sale) => void
+}) {
+  const scoped = panelScope === 'events'
+    ? sales.filter(s => !!s.event_id)
+    : panelScope === 'quick'
+      ? sales.filter(s => !s.event_id)
+      : sales
+
+  const totalRevenue = scoped.reduce((a, s) => a + s.total_amount, 0)
+  const totalProfit  = scoped.reduce((a, s) => a + s.profit, 0)
+
+  const grouped = panelScope === 'events'
+    ? (() => {
+        const map = new Map<string, { event: Sale['event']; sales: Sale[] }>()
+        for (const s of scoped) {
+          const key = s.event_id ?? '__none__'
+          if (!map.has(key)) map.set(key, { event: s.event, sales: [] })
+          map.get(key)!.sales.push(s)
+        }
+        return Array.from(map.values())
+      })()
+    : []
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Resumen */}
+      {scoped.length > 0 && (
+        <div className={`grid gap-2 px-4 pt-3 shrink-0 ${isSaleMode ? 'grid-cols-2' : 'grid-cols-3'}`}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
+            <p className="text-zinc-500 text-xs">Ventas</p>
+            <p className="text-white font-black text-lg">{scoped.length}</p>
+          </div>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
+            <p className="text-zinc-500 text-xs">Ingresos</p>
+            <p className="text-white font-black text-sm">{formatCurrency(totalRevenue)}</p>
+          </div>
+          {!isSaleMode && (
+            <div className={`border rounded-xl p-3 text-center ${totalProfit < 0 ? 'bg-red-950/30 border-red-900/50' : 'bg-zinc-900 border-zinc-800'}`}>
+              <p className="text-zinc-500 text-xs">Beneficio</p>
+              <p className={`font-black text-sm ${totalProfit < 0 ? 'text-red-400' : 'text-green-400'}`}>{formatCurrency(totalProfit)}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Filtros activos */}
+      {Object.keys(filters).length > 0 && (
+        <div className="px-4 pt-2 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-zinc-500">Filtros activos:</span>
+            <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-white hover:text-zinc-300">
+              <X size={12} />
+              Limpiar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lista */}
+      <div className="flex-1 px-4 py-3 space-y-2">
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : scoped.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-zinc-600">
+            <Clock size={40} />
+            <p className="mt-3 text-sm">
+              {panelScope === 'events' ? 'No hay ventas en conciertos' : panelScope === 'quick' ? 'No hay ventas rápidas' : 'No hay ventas registradas'}
+            </p>
+          </div>
+        ) : panelScope === 'events' ? (
+          grouped.map(group => {
+            const groupRevenue = group.sales.reduce((a, s) => a + s.total_amount, 0)
+            return (
+              <div key={group.event?.id ?? '__none__'} className="space-y-2">
+                <div className="flex items-center gap-2 pt-2 pb-1">
+                  <CalendarDays size={14} className="text-amber-500" />
+                  <p className="text-white font-bold text-sm flex-1 truncate">
+                    {group.event?.name ?? 'Concierto eliminado'}
+                  </p>
+                  <span className="text-amber-400 text-xs font-semibold">{formatCurrency(groupRevenue)}</span>
+                  <span className="text-zinc-500 text-xs">· {group.sales.length} venta{group.sales.length !== 1 ? 's' : ''}</span>
+                </div>
+                {group.sales.map(sale => (
+                  <SaleRow
+                    key={sale.id}
+                    sale={sale}
+                    isSaleMode={isSaleMode}
+                    deletingId={deletingId}
+                    onSelect={() => onSelect(sale)}
+                    onEdit={() => onEdit(sale)}
+                    onDelete={() => onDelete(sale)}
+                  />
+                ))}
+              </div>
+            )
+          })
+        ) : (
+          scoped.map(sale => (
+            <SaleRow
+              key={sale.id}
+              sale={sale}
+              isSaleMode={isSaleMode}
+              deletingId={deletingId}
+              onSelect={() => onSelect(sale)}
+              onEdit={() => onEdit(sale)}
+              onDelete={() => onDelete(sale)}
+            />
+          ))
+        )}
+      </div>
+    </div>
   )
 }

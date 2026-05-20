@@ -20,7 +20,7 @@ export async function POST(
   if (error) {
     const msg = error.message ?? ''
     if (msg.includes('EVENTO_YA_CERRADO') || msg.includes('EVENTO_YA_CANCELADO')) {
-      return NextResponse.json({ error: 'El evento ya está cerrado o cancelado.' }, { status: 409 })
+      return NextResponse.json({ error: 'El concierto ya está cerrado o cancelado.' }, { status: 409 })
     }
     return NextResponse.json({ error: msg }, { status: 500 })
   }

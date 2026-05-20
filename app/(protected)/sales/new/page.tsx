@@ -6,6 +6,7 @@ import {
   Banknote, CreditCard, Smartphone, Wallet, ChevronRight,
   Package2, LogOut, Wifi, WifiOff, RefreshCw, X,
   Zap, CalendarDays, MapPin, Building2, RotateCcw, ChevronLeft,
+  Bell,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { getDeviceId } from '@/lib/deviceId'
@@ -247,6 +248,14 @@ export default function NewSalePage() {
           )}
 
           {isSaleMode && (
+            <HelpSosButton
+              sellerName={tpvSession?.sellerName ?? null}
+              tpvSessionId={tpvSession?.id ?? null}
+              eventId={isEventMode ? activeEvent!.id : null}
+            />
+          )}
+
+          {isSaleMode && (
             <button
               onClick={handleExitSaleMode}
               className="p-2 rounded-xl bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
@@ -269,7 +278,7 @@ export default function NewSalePage() {
               <p className="text-amber-400 text-[10px] leading-tight">{activeEvent!.city} · {activeEvent!.venue}</p>
             </>
           ) : (
-            <p className="text-white text-xs font-bold leading-tight">Venta rápida (fuera de evento)</p>
+            <p className="text-white text-xs font-bold leading-tight">Venta rápida (fuera de concierto)</p>
           )}
         </div>
         {isSaleMode ? (
@@ -291,7 +300,7 @@ export default function NewSalePage() {
             onClick={handleSwitchToEvent}
             className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500 text-black text-[10px] font-bold shrink-0"
           >
-            <CalendarDays size={11} />Vender en evento
+            <CalendarDays size={11} />Vender en concierto
           </button>
         )}
       </div>
@@ -314,8 +323,8 @@ export default function NewSalePage() {
             content: loadingProducts ? <LoadingSpinner /> : products.length === 0 ? (
               <EmptyState
                 icon={<Package size={40} />}
-                text={isEventMode ? 'Este evento no tiene productos asignados todavía' : 'No hay productos activos'}
-                hint={isEventMode ? 'El admin debe asignar stock al evento desde Eventos → Stock evento' : undefined}
+                text={isEventMode ? 'Este concierto no tiene productos asignados todavía' : 'No hay productos activos'}
+                hint={isEventMode ? 'El admin debe asignar stock al concierto desde Conciertos → Stock concierto' : undefined}
               />
             ) : (
               <div className="grid grid-cols-2 gap-3 auto-rows-min">
@@ -995,8 +1004,8 @@ function TpvModeSelector({ onPickQuick, onPickEvent, onBack, onExit }: {
         >
           <CalendarDays size={44} className="text-black" strokeWidth={2.5} />
           <div className="text-center">
-            <p className="text-black text-2xl font-black leading-none">EVENTO</p>
-            <p className="text-black/70 text-sm font-medium mt-1">Vender el stock llevado a un concierto</p>
+            <p className="text-black text-2xl font-black leading-none">CONCIERTO</p>
+            <p className="text-black/70 text-sm font-medium mt-1">Vender el stock asignado a un concierto</p>
           </div>
         </button>
         <button
@@ -1010,7 +1019,7 @@ function TpvModeSelector({ onPickQuick, onPickEvent, onBack, onExit }: {
           </div>
         </button>
         <p className="text-zinc-600 text-xs text-center mt-2">
-          Modo evento: descuenta del stock reservado para el concierto.<br />
+          Modo concierto: descuenta del stock reservado para el concierto y del global.<br />
           Venta rápida: descuenta del inventario general.
         </p>
       </div>
@@ -1034,7 +1043,7 @@ function EventPicker({ onPick, onBack, onExit, backLabel = 'Atrás' }: {
         <button onClick={onBack} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-zinc-400 hover:bg-zinc-800 text-xs font-medium">
           <ChevronLeft size={16} />{backLabel}
         </button>
-        <p className="flex-1 text-white font-bold text-center">Selecciona evento</p>
+        <p className="flex-1 text-white font-bold text-center">Selecciona concierto</p>
         {onExit ? (
           <button onClick={onExit} className="p-2 rounded-xl bg-zinc-800 text-zinc-500"><LogOut size={16} /></button>
         ) : <div className="w-9" />}
@@ -1045,8 +1054,8 @@ function EventPicker({ onPick, onBack, onExit, backLabel = 'Atrás' }: {
         ) : activeEvents.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-zinc-600">
             <CalendarDays size={40} />
-            <p className="mt-3 text-sm font-medium">No hay eventos activos</p>
-            <p className="mt-1 text-xs text-zinc-700 text-center px-4">El admin debe activar un evento desde la pestaña Eventos antes de vender en modo evento.</p>
+            <p className="mt-3 text-sm font-medium">No hay conciertos activos</p>
+            <p className="mt-1 text-xs text-zinc-700 text-center px-4">El admin debe activar un concierto desde la pestaña Conciertos antes de vender en modo concierto.</p>
           </div>
         ) : (
           activeEvents.map(ev => (
@@ -1072,5 +1081,67 @@ function EventPicker({ onPick, onBack, onExit, backLabel = 'Atrás' }: {
         )}
       </div>
     </div>
+  )
+}
+
+// Campana SOS: envía un aviso al admin "X necesita ayuda".
+function HelpSosButton({ sellerName, tpvSessionId, eventId }: {
+  sellerName: string | null
+  tpvSessionId: string | null
+  eventId: string | null
+}) {
+  const [sending, setSending] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [error, setError] = useState('')
+
+  const sendAlert = async () => {
+    if (sending || sent || !sellerName) return
+    setError('')
+    setSending(true)
+    try {
+      const res = await fetch('/api/help-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          seller_name: sellerName,
+          tpv_session_id: tpvSessionId,
+          event_id: eventId,
+          message: `${sellerName} necesita ayuda, acude al puesto de merchan`,
+        }),
+      })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error((j as { error?: string }).error ?? 'Error')
+      }
+      setSent(true)
+      setTimeout(() => setSent(false), 6000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error de red')
+      setTimeout(() => setError(''), 3000)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={sendAlert}
+      disabled={sending || !sellerName}
+      title="Avisar al admin"
+      className={`relative p-2 rounded-xl transition-colors shrink-0 ${
+        sent
+          ? 'bg-green-500 text-black'
+          : error
+            ? 'bg-red-500/20 text-red-400'
+            : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+      } ${sending ? 'opacity-60' : ''}`}
+    >
+      {sent ? <Check size={16} strokeWidth={3} /> : <Bell size={16} strokeWidth={2.5} />}
+      {sending && (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <RefreshCw size={14} className="animate-spin" />
+        </span>
+      )}
+    </button>
   )
 }

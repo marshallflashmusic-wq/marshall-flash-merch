@@ -170,8 +170,8 @@ export default function EventsPage() {
   return (
     <div className="h-full flex flex-col">
       <TopBar
-        title="Eventos / Conciertos"
-        subtitle={`${events.length} evento${events.length !== 1 ? 's' : ''}`}
+        title="Conciertos"
+        subtitle={`${events.length} concierto${events.length !== 1 ? 's' : ''}`}
         actions={user?.role === 'admin' && (
           <button onClick={openNew} className="p-2 rounded-xl bg-amber-500 text-black">
             <Plus size={18} strokeWidth={2.5} />
@@ -190,9 +190,9 @@ export default function EventsPage() {
         ]}
       />
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title={editEvent ? 'Editar evento' : 'Nuevo evento'} size="md">
+      <Modal open={showModal} onClose={() => setShowModal(false)} title={editEvent ? 'Editar concierto' : 'Nuevo concierto'} size="md">
         <form onSubmit={e => handleSave(e, 'create')} className="space-y-4">
-          <Input label="Nombre del evento *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
+          <Input label="Nombre del concierto *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
           <div className="grid grid-cols-2 gap-3">
             <Input label="Ciudad *" value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} required />
             <Input label="Sala / Venue *" value={form.venue} onChange={e => setForm(f => ({ ...f, venue: e.target.value }))} required />
@@ -213,7 +213,7 @@ export default function EventsPage() {
             <div className="flex flex-col gap-2 pt-2">
               <div className="flex gap-2">
                 <Button type="button" variant="outline" fullWidth onClick={() => setShowModal(false)} disabled={saving}>Cancelar</Button>
-                <Button type="submit" fullWidth loading={saving}>Crear evento</Button>
+                <Button type="submit" fullWidth loading={saving}>Crear concierto</Button>
               </div>
               <Button
                 type="button"
@@ -230,15 +230,15 @@ export default function EventsPage() {
       </Modal>
 
       <Modal open={!!actionEvent} onClose={() => setActionEvent(null)} title={
-        actionEvent?.action === 'close' ? 'Cerrar evento'
-        : actionEvent?.action === 'cancel' ? 'Cancelar evento'
-        : 'Eliminar evento'
+        actionEvent?.action === 'close' ? 'Cerrar concierto'
+        : actionEvent?.action === 'cancel' ? 'Cancelar concierto'
+        : 'Eliminar concierto'
       } size="sm">
         <div className="space-y-4">
           {actionEvent?.action !== 'delete' && (
             <p className="text-zinc-400 text-sm">
-              {actionEvent?.action === 'close' && 'Al cerrar el evento, las unidades NO vendidas se devolverán automáticamente al stock global. Las ventas registradas se mantienen ligadas al evento.'}
-              {actionEvent?.action === 'cancel' && 'Al cancelar, las unidades restantes vuelven al stock global. Las ventas registradas se mantienen pero el evento queda marcado como cancelado.'}
+              {actionEvent?.action === 'close' && 'Al cerrar el concierto las unidades no vendidas dejan de estar reservadas. Las ventas registradas se mantienen ligadas al concierto.'}
+              {actionEvent?.action === 'cancel' && 'Al cancelar, la reserva del concierto se libera. Las ventas registradas se mantienen pero el concierto queda marcado como cancelado.'}
             </p>
           )}
           {actionEvent?.action === 'delete' && (
@@ -255,8 +255,8 @@ export default function EventsPage() {
               <CheckOption
                 checked={deleteSales}
                 onToggle={() => setDeleteSales(v => !v)}
-                title="Eliminar ventas del evento"
-                description="Borra del historial las ventas registradas en este evento. Si no marcas esto no se podrá eliminar el evento mientras tenga ventas."
+                title="Eliminar ventas del concierto"
+                description="Borra del historial las ventas registradas en este concierto. Si no marcas esto no se podrá eliminar el concierto mientras tenga ventas."
               />
             </>
           )}
@@ -300,8 +300,8 @@ function EventList({
     return (
       <div className="flex flex-col items-center justify-center py-16 text-zinc-600">
         <CalendarDays size={40} />
-        <p className="mt-3 text-sm">Sin eventos en esta categoría</p>
-        <button onClick={onCreate} className="mt-3 text-amber-500 text-sm">Crear evento</button>
+        <p className="mt-3 text-sm">Sin conciertos en esta categoría</p>
+        <button onClick={onCreate} className="mt-3 text-amber-500 text-sm">Crear concierto</button>
       </div>
     )
   }
@@ -358,7 +358,7 @@ function EventCard({
       <div className="flex border-t border-zinc-800">
         {(status === 'upcoming' || status === 'active') && (
           <button onClick={onPrepare} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-amber-400 hover:bg-amber-500/10 transition-colors">
-            <PackageCheck size={13} />Stock evento
+            <PackageCheck size={13} />Stock concierto
             <ChevronRight size={13} />
           </button>
         )}
@@ -388,7 +388,7 @@ function EventCard({
           </button>
         )}
         {isAdmin && (
-          <button onClick={() => onAskAction('delete')} className="flex items-center justify-center px-3 py-2.5 text-xs text-red-500 hover:bg-red-950/40 transition-colors border-l border-zinc-800" aria-label="Eliminar evento">
+          <button onClick={() => onAskAction('delete')} className="flex items-center justify-center px-3 py-2.5 text-xs text-red-500 hover:bg-red-950/40 transition-colors border-l border-zinc-800" aria-label="Eliminar concierto">
             <Trash2 size={12} />
           </button>
         )}
