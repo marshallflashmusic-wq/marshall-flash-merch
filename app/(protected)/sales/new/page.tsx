@@ -1084,18 +1084,33 @@ function EventPicker({ onPick, onBack, onExit, backLabel = 'Atrás' }: {
   )
 }
 
-// Campana SOS: envía un aviso al admin "X necesita ayuda".
+// Plantillas rápidas para el aviso del TPV al admin
+const SOS_TEMPLATES = [
+  'Necesito ayuda en el puesto',
+  'No hay cambio',
+  'Hay que firmar un disco',
+  'Falta stock',
+  'Cliente pregunta por talla',
+  'Problema con el pago',
+]
+
+// Campana SOS: abre un modal para elegir plantilla o escribir mensaje libre y
+// enviarlo al admin.
 function HelpSosButton({ sellerName, tpvSessionId, eventId }: {
   sellerName: string | null
   tpvSessionId: string | null
   eventId: string | null
 }) {
+  const [open, setOpen] = useState(false)
+  const [custom, setCustom] = useState('')
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
 
-  const sendAlert = async () => {
-    if (sending || sent || !sellerName) return
+  const send = async (template?: string) => {
+    if (sending || !sellerName) return
+    const msg = (template ?? custom).trim()
+    if (!msg) return
     setError('')
     setSending(true)
     try {
@@ -1106,7 +1121,8 @@ function HelpSosButton({ sellerName, tpvSessionId, eventId }: {
           seller_name: sellerName,
           tpv_session_id: tpvSessionId,
           event_id: eventId,
-          message: `${sellerName} necesita ayuda, acude al puesto de merchan`,
+          message: msg,
+          from_role: 'tpv',
         }),
       })
       if (!res.ok) {
@@ -1114,7 +1130,8 @@ function HelpSosButton({ sellerName, tpvSessionId, eventId }: {
         throw new Error((j as { error?: string }).error ?? 'Error')
       }
       setSent(true)
-      setTimeout(() => setSent(false), 6000)
+      setCustom('')
+      setTimeout(() => { setSent(false); setOpen(false) }, 1100)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error de red')
       setTimeout(() => setError(''), 3000)
@@ -1124,24 +1141,88 @@ function HelpSosButton({ sellerName, tpvSessionId, eventId }: {
   }
 
   return (
-    <button
-      onClick={sendAlert}
-      disabled={sending || !sellerName}
-      title="Avisar al admin"
-      className={`relative p-2 rounded-xl transition-colors shrink-0 ${
-        sent
-          ? 'bg-green-500 text-black'
-          : error
-            ? 'bg-red-500/20 text-red-400'
+    <>
+      <button
+        onClick={() => { setError(''); setSent(false); setOpen(true) }}
+        disabled={!sellerName}
+        title="Avisar al admin"
+        className={`relative p-2 rounded-xl transition-colors shrink-0 ${
+          sent
+            ? 'bg-green-500 text-black'
             : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
-      } ${sending ? 'opacity-60' : ''}`}
-    >
-      {sent ? <Check size={16} strokeWidth={3} /> : <Bell size={16} strokeWidth={2.5} />}
-      {sending && (
-        <span className="absolute inset-0 flex items-center justify-center">
-          <RefreshCw size={14} className="animate-spin" />
-        </span>
-      )}
-    </button>
+        }`}
+      >
+        {sent ? <Check size={16} strokeWidth={3} /> : <Bell size={16} strokeWidth={2.5} />}
+      </button>
+
+      <Modal open={open} onClose={() => !sending && setOpen(false)} title="Avisar al admin" size="md">
+        <div className="space-y-4">
+          {sent ? (
+            <div className="flex flex-col items-center py-6 gap-2">
+              <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center">
+                <Check size={22} className="text-black" strokeWidth={3} />
+              </div>
+              <p className="text-white font-bold text-sm">Aviso enviado</p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                  Avisos rápidos
+                </p>
+                <div className="grid grid-cols-1 gap-2">
+                  {SOS_TEMPLATES.map(t => (
+                    <button
+                      key={t}
+                      onClick={() => send(t)}
+                      disabled={sending}
+                      className="flex items-center gap-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 rounded-xl px-3 py-2.5 text-left text-sm text-amber-200 font-medium active:scale-[0.98] transition-transform disabled:opacity-40"
+                    >
+                      <Bell size={14} className="text-amber-400 shrink-0" />
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                  O escribe un mensaje
+                </p>
+                <textarea
+                  value={custom}
+                  onChange={e => setCustom(e.target.value)}
+                  placeholder="Ej: Tengo que ir un momento, ¿puedes cubrirme?"
+                  rows={3}
+                  disabled={sending}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-500 resize-none text-sm"
+                />
+              </div>
+
+              {error && (
+                <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2">
+                  <p className="text-red-400 text-xs">{error}</p>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button variant="outline" fullWidth onClick={() => setOpen(false)} disabled={sending}>
+                  Cancelar
+                </Button>
+                <Button
+                  fullWidth
+                  onClick={() => send()}
+                  loading={sending}
+                  disabled={!custom.trim()}
+                  className="bg-amber-500 hover:bg-amber-400 text-black"
+                >
+                  Enviar
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
+    </>
   )
 }
