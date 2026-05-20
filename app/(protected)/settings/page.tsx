@@ -138,7 +138,7 @@ function GeneralTab({ user, onLogout, isAdmin }: { user: User | null; onLogout: 
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-zinc-500">App</span>
-              <span className="text-white">Marshall Flash Merch</span>
+              <span className="text-white">MyMerch</span>
             </div>
             <div className="flex justify-between">
               <span className="text-zinc-500">Versión</span>

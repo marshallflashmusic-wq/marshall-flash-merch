@@ -1,8 +1,9 @@
 'use client'
 import { useState } from 'react'
+import Image from 'next/image'
 import {
   HelpCircle, CalendarDays, Package, ShoppingCart, Terminal,
-  ChevronDown, Sparkles,
+  ChevronDown,
 } from 'lucide-react'
 import TopBar from '@/components/layout/TopBar'
 import Card from '@/components/ui/Card'
@@ -78,11 +79,18 @@ export default function HelpPage() {
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         <Card padding="md">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
-              <Sparkles size={18} className="text-amber-400" />
+            <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 bg-zinc-900 border border-zinc-800">
+              <Image
+                src="/icons/icon-192.png"
+                alt="MyMerch"
+                width={48}
+                height={48}
+                className="w-full h-full object-cover"
+                priority
+              />
             </div>
             <div>
-              <p className="text-white font-bold text-sm">Marshall Flash Merch</p>
+              <p className="text-white font-bold text-sm">MyMerch</p>
               <p className="text-zinc-500 text-xs mt-0.5">
                 App TPV de merchandising para conciertos. Toca cada sección para ver los pasos.
               </p>
@@ -125,8 +133,8 @@ export default function HelpPage() {
             <HelpCircle size={14} />
             <p className="text-xs">¿Algo no funciona? Avísanos.</p>
           </div>
-          <p className="text-zinc-500 text-xs mt-3 font-semibold">Powered by Marshall Flash</p>
-          <p className="text-zinc-700 text-[10px] mt-1">v1.0 · Marshall Flash Merch</p>
+          <p className="text-zinc-500 text-xs mt-3 font-semibold">Powered by MyMerch</p>
+          <p className="text-zinc-700 text-[10px] mt-1">v1.0 · MyMerch</p>
         </div>
       </div>
     </div>

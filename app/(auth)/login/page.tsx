@@ -195,7 +195,7 @@ export default function LoginPage() {
 
       </div>
 
-      <p className="text-zinc-700 text-[11px] mt-6">Powered by Marshall Flash</p>
+      <p className="text-zinc-700 text-[11px] mt-6">Powered by MyMerch</p>
     </div>
   )
 }

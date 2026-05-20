@@ -559,7 +559,7 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
           label="Nombre *"
           value={form.name}
           onChange={e => { setForm(f => ({ ...f, name: e.target.value })); setFieldErrors(fe => ({ ...fe, name: '' })) }}
-          placeholder="Ej: Camiseta Marshall Flash"
+          placeholder="Ej: Camiseta del grupo"
           error={fieldErrors.name}
         />
 
