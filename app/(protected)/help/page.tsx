@@ -17,6 +17,19 @@ type Section = {
 
 const SECTIONS: Section[] = [
   {
+    key: 'create-items-packs',
+    title: 'Crear artículos y packs',
+    icon: Package,
+    steps: [
+      'Artículos: entra en "Stock" y pulsa el + arriba a la derecha. Rellena nombre, categoría, precio de venta y, si quieres, precio de compra para calcular beneficio.',
+      'Si la categoría es "Textil", verás una cuadrícula para meter stock por talla (XS–XXL). Para el resto de categorías, basta con la cantidad total.',
+      'Puedes subir una foto o pegar una URL. Pulsa "Crear artículo" para guardarlo. Lo verás en el listado y podrás reordenarlo arrastrando.',
+      'Packs: en "Stock" cambia a la pestaña "Packs" y pulsa el + arriba. Pon nombre y precio del pack.',
+      'Añade los productos que incluye y la cantidad de cada uno. Opcionalmente puedes asignar un precio individual dentro del pack para que aparezca correctamente en el ticket.',
+      'El stock disponible del pack se calcula automáticamente a partir del stock de sus componentes. Si algún producto se queda a 0, el pack se marca como AGOTADO.',
+    ],
+  },
+  {
     key: 'create-event',
     title: 'Crear un concierto',
     icon: CalendarDays,
@@ -70,7 +83,7 @@ const SECTIONS: Section[] = [
 ]
 
 export default function HelpPage() {
-  const [open, setOpen] = useState<string | null>('create-event')
+  const [open, setOpen] = useState<string | null>('create-items-packs')
 
   return (
     <div className="h-full flex flex-col">
