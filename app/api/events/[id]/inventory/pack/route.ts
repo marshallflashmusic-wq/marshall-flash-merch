@@ -20,7 +20,7 @@ export async function POST(
   const supabase = getServiceClient()
   const { id: eventId } = await params
   const body = await request.json()
-  const { pack_id, delta } = body
+  const { pack_id, delta, warehouse_id } = body
 
   if (!pack_id || typeof delta !== 'number' || delta === 0) {
     return NextResponse.json({ error: 'Faltan parámetros (pack_id, delta)' }, { status: 400 })
@@ -50,38 +50,39 @@ export async function POST(
     )
   }
 
-  // Asignar atómicamente cada componente. Si uno falla, intentar revertir los previos.
+  // Asignar componente a componente delegando en el endpoint estándar (que ya
+  // sabe restar de warehouse_stock cuando hay almacén origen).
   const applied: { product_id: string; qty: number }[] = []
   try {
     for (const it of items) {
       const qty = it.quantity * delta
-      const { error } = await supabase.rpc('assign_event_stock', {
-        p_event_id: eventId,
-        p_product_id: it.product_id,
-        p_variant_id: null,
-        p_delta: qty,
+      const res = await fetch(new URL(`/api/events/${eventId}/inventory`, request.url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: it.product_id,
+          variant_id: null,
+          delta: qty,
+          warehouse_id: warehouse_id ?? null,
+        }),
       })
-      if (error) throw new Error(error.message)
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error((j as { error?: string }).error ?? 'Error')
+      }
       applied.push({ product_id: it.product_id, qty })
     }
     return NextResponse.json({ success: true })
   } catch (e) {
-    // Rollback manual: revertir lo aplicado
+    // Rollback manual
     for (const a of applied) {
-      await supabase.rpc('assign_event_stock', {
-        p_event_id: eventId,
-        p_product_id: a.product_id,
-        p_variant_id: null,
-        p_delta: -a.qty,
-      })
+      await fetch(new URL(`/api/events/${eventId}/inventory`, request.url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_id: a.product_id, variant_id: null, delta: -a.qty, warehouse_id: warehouse_id ?? null }),
+      }).catch(() => {})
     }
     const msg = e instanceof Error ? e.message : String(e)
-    if (msg.includes('STOCK_GLOBAL_INSUFICIENTE')) {
-      return NextResponse.json({ error: 'No hay suficiente stock global de uno de los componentes.' }, { status: 409 })
-    }
-    if (msg.includes('NO_PUEDE_DESASIGNAR_VENDIDO')) {
-      return NextResponse.json({ error: 'No se puede desasignar: hay packs ya vendidos en el evento.' }, { status: 409 })
-    }
-    return NextResponse.json({ error: msg }, { status: 500 })
+    return NextResponse.json({ error: msg }, { status: 409 })
   }
 }

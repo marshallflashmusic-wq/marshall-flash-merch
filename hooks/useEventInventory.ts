@@ -28,13 +28,23 @@ export function useEventInventory(eventId: string | null) {
 
   useEffect(() => { fetchInv() }, [fetchInv])
 
-  const adjust = useCallback(async (productId: string, variantId: string | null, delta: number) => {
+  const adjust = useCallback(async (
+    productId: string,
+    variantId: string | null,
+    delta: number,
+    warehouseId?: string | null,
+  ) => {
     if (!eventId) return { success: false, error: 'No event' }
     try {
       const res = await fetch(`/api/events/${eventId}/inventory`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product_id: productId, variant_id: variantId, delta }),
+        body: JSON.stringify({
+          product_id: productId,
+          variant_id: variantId,
+          delta,
+          warehouse_id: warehouseId ?? null,
+        }),
       })
       const json = await res.json()
       if (!res.ok) return { success: false, error: json.error ?? 'Error' }

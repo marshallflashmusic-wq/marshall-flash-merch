@@ -65,6 +65,7 @@ export default function WarehousesPage() {
   const [assignWh, setAssignWh] = useState<Warehouse | null>(null)
   const [fillingId, setFillingId] = useState<string | null>(null)
   const [fillResult, setFillResult] = useState<{ id: string; units: number } | null>(null)
+  const [unassignedOpen, setUnassignedOpen] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -83,17 +84,52 @@ export default function WarehousesPage() {
 
   useEffect(() => { load() }, [load])
 
-  const stockByProduct = useMemo(() => {
-    const map = new Map<string, number>()
+  // Sin ubicar por (product_id, variant_id|null): stock real - lo ubicado en cualquier almacén.
+  const unassignedRows = useMemo(() => {
+    // Asignado total por clave
+    const assignedKey = new Map<string, number>()
     for (const s of stock) {
-      map.set(s.product_id, (map.get(s.product_id) ?? 0) + s.quantity)
+      const k = `${s.product_id}::${s.variant_id ?? ''}`
+      assignedKey.set(k, (assignedKey.get(k) ?? 0) + s.quantity)
     }
-    return map
-  }, [stock])
+    // Filas: una por producto sin variantes; una por variante si tiene
+    type Row = { product_id: string; product_name: string; image_url: string | null; variant_id: string | null; size: string | null; unassigned: number; total: number }
+    const rows: Row[] = []
+    const variantsByProduct = new Map<string, Variant[]>()
+    for (const v of variants) {
+      const list = variantsByProduct.get(v.product_id) ?? []
+      list.push(v); variantsByProduct.set(v.product_id, list)
+    }
+    for (const p of products) {
+      const vs = variantsByProduct.get(p.id) ?? []
+      if (vs.length === 0) {
+        const k = `${p.id}::`
+        const unassigned = p.stock - (assignedKey.get(k) ?? 0)
+        if (unassigned > 0) rows.push({
+          product_id: p.id, product_name: p.name, image_url: p.image_url,
+          variant_id: null, size: null, unassigned, total: p.stock,
+        })
+      } else {
+        for (const v of vs.slice().sort((a, b) => SIZE_ORDER.indexOf(a.size) - SIZE_ORDER.indexOf(b.size))) {
+          const k = `${p.id}::${v.id}`
+          const unassigned = v.stock - (assignedKey.get(k) ?? 0)
+          if (unassigned > 0) rows.push({
+            product_id: p.id, product_name: p.name, image_url: p.image_url,
+            variant_id: v.id, size: v.size, unassigned, total: v.stock,
+          })
+        }
+      }
+    }
+    return rows
+  }, [products, variants, stock])
 
-  const totalGlobal = products.reduce((a, p) => a + p.stock, 0)
+  const totalGlobal = products.reduce((a, p) => {
+    const vs = variants.filter(v => v.product_id === p.id)
+    if (vs.length === 0) return a + p.stock
+    return a + vs.reduce((s, v) => s + v.stock, 0)
+  }, 0)
   const totalUbicado = stock.reduce((a, s) => a + s.quantity, 0)
-  const totalSinUbicar = Math.max(0, totalGlobal - totalUbicado)
+  const totalSinUbicar = unassignedRows.reduce((a, r) => a + r.unassigned, 0)
 
   const handleCreate = async () => {
     setCreateErr('')
@@ -197,20 +233,30 @@ export default function WarehousesPage() {
               <p className="text-zinc-500 text-xs">Ubicado</p>
               <p className="text-white font-black text-lg">{totalUbicado}</p>
             </div>
-            <div>
+            <button
+              onClick={() => setUnassignedOpen(true)}
+              disabled={totalSinUbicar === 0}
+              className={`rounded-lg py-1 -my-1 transition-colors ${
+                totalSinUbicar > 0 ? 'hover:bg-amber-500/10 active:bg-amber-500/20' : ''
+              }`}
+            >
               <p className="text-zinc-500 text-xs">Sin ubicar</p>
-              <p className={`font-black text-lg ${totalSinUbicar > 0 ? 'text-amber-400' : 'text-zinc-500'}`}>
+              <p className={`font-black text-lg ${totalSinUbicar > 0 ? 'text-amber-400 underline decoration-dotted underline-offset-2' : 'text-zinc-500'}`}>
                 {totalSinUbicar}
               </p>
-            </div>
+            </button>
           </div>
           {totalSinUbicar > 0 && (
-            <div className="flex items-start gap-2 mt-3 bg-amber-950/40 border border-amber-900/60 rounded-xl px-3 py-2">
+            <button
+              onClick={() => setUnassignedOpen(true)}
+              className="w-full flex items-start gap-2 mt-3 bg-amber-950/40 hover:bg-amber-950/60 border border-amber-900/60 rounded-xl px-3 py-2 text-left transition-colors"
+            >
               <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
-              <p className="text-amber-300 text-xs">
-                Hay {totalSinUbicar} unidades sin asignar a ningún almacén. Pulsa &quot;Almacén único&quot; para consolidar todo en uno, o asigna manualmente.
+              <p className="text-amber-300 text-xs flex-1">
+                Hay {totalSinUbicar} unidades sin asignar a ningún almacén. Toca para ver el detalle.
               </p>
-            </div>
+              <ChevronDown size={14} className="text-amber-500 shrink-0 mt-0.5 -rotate-90" />
+            </button>
           )}
         </Card>
 
@@ -391,6 +437,41 @@ export default function WarehousesPage() {
             <Button fullWidth onClick={handleEditSave}>Guardar</Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Modal detalle "Sin ubicar" */}
+      <Modal open={unassignedOpen} onClose={() => setUnassignedOpen(false)} title={`Sin ubicar (${totalSinUbicar} ud${totalSinUbicar !== 1 ? 's' : ''})`} size="md">
+        {unassignedRows.length === 0 ? (
+          <div className="flex flex-col items-center py-10 text-zinc-600">
+            <Check size={32} className="text-green-500" />
+            <p className="mt-2 text-sm">Todo el stock está ubicado</p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+            <p className="text-zinc-500 text-xs">
+              Estos artículos tienen unidades que aún no están en ningún almacén. Asígnalos manualmente o usa &quot;Añadir todo el stock&quot; desde un almacén.
+            </p>
+            {unassignedRows.map((r, idx) => (
+              <div key={`${r.product_id}-${r.variant_id ?? 'none'}-${idx}`} className="flex items-center gap-3 bg-zinc-800/50 border border-zinc-800 rounded-xl p-2.5">
+                <div className="w-10 h-10 rounded-lg bg-zinc-800 overflow-hidden shrink-0">
+                  {r.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={r.image_url} alt={r.product_name} className="w-full h-full object-cover" />
+                  ) : <div className="w-full h-full flex items-center justify-center"><Package size={16} className="text-zinc-600" /></div>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-semibold truncate">{r.product_name}</p>
+                  <p className="text-zinc-500 text-xs mt-0.5">
+                    {r.size ? `Talla ${r.size} · ` : ''}{r.total} ud total
+                  </p>
+                </div>
+                <span className="bg-amber-500 text-black text-xs font-black px-2 py-1 rounded-lg shrink-0">
+                  +{r.unassigned}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </Modal>
 
       {/* Modal asignar artículos */}

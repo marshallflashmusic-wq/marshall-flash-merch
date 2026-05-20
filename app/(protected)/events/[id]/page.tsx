@@ -5,6 +5,7 @@ import {
   ChevronLeft, Search, Package, Minus, Plus, AlertTriangle,
   CalendarDays, MapPin, Building2, Lock, Play, CheckCircle2, X, Check,
   Package2, Clock, Receipt, Banknote, CreditCard, Smartphone, Wallet,
+  Warehouse, EyeOff, Eye,
 } from 'lucide-react'
 import { useAllProducts } from '@/hooks/useProducts'
 import { usePacks } from '@/hooks/usePacks'
@@ -44,6 +45,44 @@ export default function EventDetailPage() {
   const [closeLoading, setCloseLoading] = useState(false)
   const [closeError, setCloseError] = useState('')
 
+  // Selector de almacén origen para todas las asignaciones a este concierto.
+  // Persistido en localStorage para que aguante recargas.
+  const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>([])
+  const [warehouseId, setWarehouseId] = useState<string>('')
+  const [showWhPicker, setShowWhPicker] = useState<boolean>(true)
+  useEffect(() => {
+    fetch('/api/warehouses', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => {
+        const list = (j.warehouses ?? []) as { id: string; name: string }[]
+        setWarehouses(list)
+        // Si solo hay uno, lo dejamos preseleccionado y ocultamos el picker.
+        const saved = typeof window !== 'undefined' ? localStorage.getItem('event_assign_warehouse') : null
+        if (saved && list.some(w => w.id === saved)) setWarehouseId(saved)
+        else if (list.length > 0) setWarehouseId(list[0].id)
+        if (list.length <= 1) setShowWhPicker(false)
+        else {
+          const hidden = typeof window !== 'undefined' && localStorage.getItem('event_assign_hide_wh') === '1'
+          setShowWhPicker(!hidden)
+        }
+      })
+      .catch(() => {})
+  }, [])
+  useEffect(() => {
+    if (warehouseId && typeof window !== 'undefined') {
+      localStorage.setItem('event_assign_warehouse', warehouseId)
+    }
+  }, [warehouseId])
+  const toggleWhPicker = () => {
+    setShowWhPicker(prev => {
+      const next = !prev
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('event_assign_hide_wh', next ? '0' : '1')
+      }
+      return next
+    })
+  }
+
   useEffect(() => {
     if (!eventId) return
     fetch('/api/events', { cache: 'no-store' })
@@ -68,7 +107,7 @@ export default function EventDetailPage() {
     const key = `${productId}::${variantId ?? ''}`
     setSavingMap(m => ({ ...m, [key]: true }))
     setErrorMap(m => ({ ...m, [key]: '' }))
-    const res = await adjust(productId, variantId, delta)
+    const res = await adjust(productId, variantId, delta, warehouseId || null)
     if (!res.success) {
       setErrorMap(m => ({ ...m, [key]: res.error ?? 'Error' }))
       setTimeout(() => setErrorMap(m => ({ ...m, [key]: '' })), 3000)
@@ -150,7 +189,7 @@ export default function EventDetailPage() {
       const res = await fetch(`/api/events/${eventId}/inventory/pack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pack_id: pack.id, delta }),
+        body: JSON.stringify({ pack_id: pack.id, delta, warehouse_id: warehouseId || null }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Error')
@@ -209,6 +248,41 @@ export default function EventDetailPage() {
           <SummaryCell label="Vendido" value={summary.totalSold} accent="text-green-400" />
           <SummaryCell label="Restante" value={summary.totalRemaining} accent="text-amber-400" />
         </div>
+
+        {/* Selector de almacén origen */}
+        {isAdmin && !isClosed && warehouses.length > 0 && (
+          showWhPicker ? (
+            <div className="flex items-center gap-2 mt-3 bg-zinc-900 border border-zinc-800 rounded-xl px-2 py-1.5">
+              <Warehouse size={14} className="text-zinc-500 shrink-0 ml-1" />
+              <span className="text-zinc-500 text-[11px] uppercase tracking-wide shrink-0">Origen</span>
+              <select
+                value={warehouseId}
+                onChange={e => setWarehouseId(e.target.value)}
+                className="flex-1 min-w-0 bg-zinc-800 border border-zinc-700 rounded-lg py-1.5 px-2 text-white text-xs focus:outline-none focus:border-white"
+              >
+                {warehouses.map(w => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+              {warehouses.length > 1 && (
+                <button
+                  onClick={toggleWhPicker}
+                  title="Ocultar selector"
+                  className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 shrink-0"
+                >
+                  <EyeOff size={13} />
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={toggleWhPicker}
+              className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-zinc-300"
+            >
+              <Eye size={11} />Mostrar selector de almacén origen
+            </button>
+          )
+        )}
 
         {/* Acciones */}
         {isAdmin && !isClosed && (
