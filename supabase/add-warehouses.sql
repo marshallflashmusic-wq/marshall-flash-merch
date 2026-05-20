@@ -79,9 +79,11 @@ BEGIN
     RAISE EXCEPTION 'NOMBRE_VACIO';
   END IF;
 
-  -- Vaciar todo lo existente
-  DELETE FROM public.warehouse_stock;
-  DELETE FROM public.warehouses;
+  -- Vaciar todo lo existente.
+  -- WHERE TRUE es necesario en Supabase Cloud porque la extensión
+  -- pg-safeupdate rechaza cualquier DELETE sin cláusula WHERE.
+  DELETE FROM public.warehouse_stock WHERE TRUE;
+  DELETE FROM public.warehouses      WHERE TRUE;
 
   -- Crear el único almacén
   INSERT INTO public.warehouses(name, sort_order)
