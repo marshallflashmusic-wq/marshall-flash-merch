@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import {
   Warehouse, Plus, Edit2, Trash2, Boxes, Package,
-  ChevronDown, X, AlertTriangle, Check,
+  ChevronDown, AlertTriangle, Check, Download,
 } from 'lucide-react'
 import TopBar from '@/components/layout/TopBar'
 import Card from '@/components/ui/Card'
@@ -63,6 +63,8 @@ export default function WarehousesPage() {
   const [editName, setEditName] = useState('')
 
   const [assignWh, setAssignWh] = useState<Warehouse | null>(null)
+  const [fillingId, setFillingId] = useState<string | null>(null)
+  const [fillResult, setFillResult] = useState<{ id: string; units: number } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -151,6 +153,24 @@ export default function WarehousesPage() {
     })
     setEditWh(null)
     load()
+  }
+
+  const handleFill = async (wh: Warehouse) => {
+    if (totalSinUbicar === 0) return
+    if (!confirm(`Añadir las ${totalSinUbicar} unidades sin ubicar a "${wh.name}"?`)) return
+    setFillingId(wh.id)
+    try {
+      const res = await fetch(`/api/warehouses/${wh.id}/fill`, { method: 'POST' })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Error')
+      setFillResult({ id: wh.id, units: j.result?.units_added ?? 0 })
+      setTimeout(() => setFillResult(null), 2500)
+      load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Error al añadir stock')
+    } finally {
+      setFillingId(null)
+    }
   }
 
   return (
@@ -262,13 +282,34 @@ export default function WarehousesPage() {
                     </button>
                   </div>
                 </div>
-                <button
-                  onClick={() => setAssignWh(wh)}
-                  className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-amber-400 hover:bg-amber-500/10 transition-colors border-t border-zinc-800"
-                >
-                  <Package size={13} />Asignar artículos
-                  <ChevronDown size={12} className="-rotate-90" />
-                </button>
+                <div className="flex border-t border-zinc-800">
+                  <button
+                    onClick={() => setAssignWh(wh)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-amber-400 hover:bg-amber-500/10 transition-colors"
+                  >
+                    <Package size={13} />Asignar artículos
+                    <ChevronDown size={12} className="-rotate-90" />
+                  </button>
+                  <button
+                    onClick={() => handleFill(wh)}
+                    disabled={totalSinUbicar === 0 || fillingId === wh.id}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium border-l border-zinc-800 transition-colors ${
+                      fillResult?.id === wh.id
+                        ? 'bg-green-500 text-black'
+                        : totalSinUbicar === 0
+                          ? 'text-zinc-600 cursor-not-allowed'
+                          : 'text-white hover:bg-white/10'
+                    } disabled:opacity-60`}
+                  >
+                    {fillResult?.id === wh.id ? (
+                      <><Check size={13} strokeWidth={3} />Añadido {fillResult.units}</>
+                    ) : fillingId === wh.id ? (
+                      <><div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />Añadiendo…</>
+                    ) : (
+                      <><Download size={13} />Añadir todo el stock{totalSinUbicar > 0 && ` (${totalSinUbicar})`}</>
+                    )}
+                  </button>
+                </div>
               </Card>
             )
           })
