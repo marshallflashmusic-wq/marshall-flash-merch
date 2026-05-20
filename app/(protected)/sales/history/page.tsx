@@ -52,15 +52,30 @@ export default function SalesHistoryPage() {
   const [editPayment, setEditPayment] = useState<PaymentMethod>('efectivo')
   const [editNotes, setEditNotes] = useState('')
   const [editError, setEditError] = useState('')
-  const { sales, loading, total, refetch } = useSalesHistory(filters)
-  const { isSaleMode } = useAppStore()
+  const { isSaleMode, activeEvent } = useAppStore()
+  // En modo TPV el invitado solo puede ver ventas del evento activo.
+  // Forzamos el filtro de evento en la consulta para que ni siquiera se
+  // transmitan al cliente las ventas globales/rápidas.
+  const effectiveFilters = useMemo<SaleFilters>(() => (
+    isSaleMode && activeEvent?.id
+      ? { ...filters, event_id: activeEvent.id }
+      : filters
+  ), [filters, isSaleMode, activeEvent?.id])
+  const skipFetch = isSaleMode && !activeEvent
+  const { sales: rawSales, loading, total: rawTotal, refetch } = useSalesHistory(effectiveFilters)
+  // Si el TPV no tiene evento activo, vaciamos para no exponer ventas globales.
+  const sales = skipFetch ? [] : rawSales
+  const total = skipFetch ? 0 : rawTotal
   const [scope, setScope] = useState<ScopeTab>('all')
 
   const scopedSales = useMemo(() => {
+    // TPV: scope fijo a "evento". Defensa en profundidad por si la API devolviera
+    // algo sin event_id pese al filtro.
+    if (isSaleMode) return sales.filter(s => !!s.event_id)
     if (scope === 'events') return sales.filter(s => !!s.event_id)
     if (scope === 'quick')  return sales.filter(s => !s.event_id)
     return sales
-  }, [sales, scope])
+  }, [sales, scope, isSaleMode])
 
   // Agrupado por evento para la pestaña "En eventos"
   const groupedByEvent = useMemo(() => {
@@ -193,41 +208,65 @@ export default function SalesHistoryPage() {
         title="Historial de ventas"
         subtitle={`${total} venta${total !== 1 ? 's' : ''}`}
         actions={
-          <div className="flex items-center gap-2">
-            <button onClick={exportCSV} className="p-2 rounded-xl hover:bg-zinc-800 text-zinc-500">
-              <Download size={18} />
-            </button>
-            <button
-              onClick={() => setShowFilters(true)}
-              className={`p-2 rounded-xl ${Object.keys(filters).length > 0 ? 'bg-white text-black' : 'hover:bg-zinc-800 text-zinc-500'}`}
-            >
-              <Filter size={18} />
-            </button>
-          </div>
+          !isSaleMode && (
+            <div className="flex items-center gap-2">
+              <button onClick={exportCSV} className="p-2 rounded-xl hover:bg-zinc-800 text-zinc-500">
+                <Download size={18} />
+              </button>
+              <button
+                onClick={() => setShowFilters(true)}
+                className={`p-2 rounded-xl ${Object.keys(filters).length > 0 ? 'bg-white text-black' : 'hover:bg-zinc-800 text-zinc-500'}`}
+              >
+                <Filter size={18} />
+              </button>
+            </div>
+          )
         }
       />
 
-      {/* Pestañas Total / Eventos / Rápidas */}
-      <div className="px-4 pt-3 pb-1 shrink-0">
-        <div className="flex bg-zinc-900 border border-zinc-800 rounded-xl p-1 gap-1">
-          {([
-            { key: 'all', label: 'Totales', count: sales.length },
-            { key: 'events', label: 'En eventos', count: eventCount },
-            { key: 'quick', label: 'Rápidas', count: quickCount },
-          ] as { key: ScopeTab; label: string; count: number }[]).map(t => (
-            <button
-              key={t.key}
-              onClick={() => setScope(t.key)}
-              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                scope === t.key ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              {t.label}
-              {t.count > 0 && <span className={`ml-1.5 text-[10px] ${scope === t.key ? 'text-black/60' : 'text-zinc-500'}`}>{t.count}</span>}
-            </button>
-          ))}
+      {/* Pestañas Total / Eventos / Rápidas — ocultas en TPV: el invitado solo
+          ve ventas del evento activo. */}
+      {!isSaleMode && (
+        <div className="px-4 pt-3 pb-1 shrink-0">
+          <div className="flex bg-zinc-900 border border-zinc-800 rounded-xl p-1 gap-1">
+            {([
+              { key: 'all', label: 'Totales', count: sales.length },
+              { key: 'events', label: 'En eventos', count: eventCount },
+              { key: 'quick', label: 'Rápidas', count: quickCount },
+            ] as { key: ScopeTab; label: string; count: number }[]).map(t => (
+              <button
+                key={t.key}
+                onClick={() => setScope(t.key)}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  scope === t.key ? 'bg-white text-black' : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                {t.label}
+                {t.count > 0 && <span className={`ml-1.5 text-[10px] ${scope === t.key ? 'text-black/60' : 'text-zinc-500'}`}>{t.count}</span>}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* TPV: banner con el evento activo. Si no hay, aviso. */}
+      {isSaleMode && (
+        <div className="px-4 pt-3 shrink-0">
+          {activeEvent ? (
+            <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-900/50 rounded-xl px-3 py-2">
+              <CalendarDays size={14} className="text-amber-400 shrink-0" />
+              <p className="text-amber-300 text-xs font-semibold truncate">
+                Ventas de: <span className="text-white">{activeEvent.name}</span>
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
+              <CalendarDays size={14} className="text-zinc-500 shrink-0" />
+              <p className="text-zinc-400 text-xs">Selecciona un evento en el TPV para ver su historial.</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Resumen */}
       {scopedSales.length > 0 && (

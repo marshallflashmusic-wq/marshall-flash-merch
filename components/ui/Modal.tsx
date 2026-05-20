@@ -1,5 +1,6 @@
 'use client'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -13,6 +14,10 @@ interface ModalProps {
 }
 
 export default function Modal({ open, onClose, title, children, size = 'md', showClose = true }: ModalProps) {
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => { setMounted(true) }, [])
+
   useEffect(() => {
     if (open) {
       document.body.style.overflow = 'hidden'
@@ -22,7 +27,7 @@ export default function Modal({ open, onClose, title, children, size = 'md', sho
     return () => { document.body.style.overflow = '' }
   }, [open])
 
-  if (!open) return null
+  if (!open || !mounted) return null
 
   const sizes = {
     sm: 'max-w-sm',
@@ -31,7 +36,9 @@ export default function Modal({ open, onClose, title, children, size = 'md', sho
     full: 'max-w-full mx-2',
   }
 
-  return (
+  // Portal al body para escapar de ancestros con `transform` (p.ej. SwipeableTabs),
+  // que rompen el posicionamiento de `position: fixed`.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
       onClick={onClose}
@@ -64,6 +71,7 @@ export default function Modal({ open, onClose, title, children, size = 'md', sho
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

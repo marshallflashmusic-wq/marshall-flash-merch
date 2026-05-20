@@ -53,8 +53,8 @@ export default function EventsPage() {
   }
 
   // mode = 'create' → solo crear y volver al listado.
-  // mode = 'create-and-open' → crear y abrir el editor de stock /events/[id].
-  const handleSave = async (e: React.FormEvent, mode: 'create' | 'create-and-open' = 'create') => {
+  // mode = 'activate-and-open' → crear, activar el evento (status='active') y abrir el editor de stock.
+  const handleSave = async (e: React.FormEvent, mode: 'create' | 'activate-and-open' = 'create') => {
     e.preventDefault()
     setSaveError('')
     if (!form.name.trim() || !form.city.trim() || !form.venue.trim() || !form.date) {
@@ -72,10 +72,20 @@ export default function EventsPage() {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Error')
+
+      // Si se eligió "Activar y asignar artículos", marcamos el evento como activo
+      // antes de redirigir al editor de stock.
+      if (!editEvent && mode === 'activate-and-open' && json.event?.id) {
+        await fetch('/api/events', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: json.event.id, status: 'active' }),
+        })
+      }
+
       setShowModal(false)
       await refetch()
-      // Si se eligió "Crear y Guardar", abrimos el editor de stock del evento nuevo
-      if (!editEvent && mode === 'create-and-open' && json.event?.id) {
+      if (!editEvent && mode === 'activate-and-open' && json.event?.id) {
         router.push(`/events/${json.event.id}`)
       }
     } catch (err: unknown) {
@@ -209,10 +219,10 @@ export default function EventsPage() {
                 type="button"
                 fullWidth
                 loading={saving}
-                onClick={e => handleSave(e as unknown as React.FormEvent, 'create-and-open')}
+                onClick={e => handleSave(e as unknown as React.FormEvent, 'activate-and-open')}
                 className="bg-amber-500 hover:bg-amber-400 text-black"
               >
-                Crear y Guardar stock
+                Activar y asignar artículos
               </Button>
             </div>
           )}

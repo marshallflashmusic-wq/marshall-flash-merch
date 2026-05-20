@@ -132,9 +132,12 @@ export default function SwipeableTabs({
         />
       </div>
 
-      {/* Área deslizable */}
+      {/* Área deslizable. `touch-action: pan-y` permite scroll vertical dentro de
+          los paneles pero bloquea gestos horizontales del navegador (back/forward
+          swipe). `overscroll-contain` evita que el scroll se filtre al body. */}
       <div
-        className="flex-1 min-h-0 overflow-hidden"
+        className="flex-1 min-h-0 overflow-hidden overscroll-contain"
+        style={{ touchAction: 'pan-y' }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -143,7 +146,7 @@ export default function SwipeableTabs({
           {tabs.map(tab => (
             <div
               key={tab.key}
-              className={`overflow-y-auto h-full ${panelClassName}`}
+              className={`overflow-y-auto overscroll-contain h-full ${panelClassName}`}
               style={{ width: `${100 / n}%`, flexShrink: 0 }}
             >
               {tab.content}
