@@ -69,7 +69,8 @@ export default function EventsPage() {
     try {
       const url = '/api/events'
       const method = editEvent ? 'PATCH' : 'POST'
-      const body = editEvent ? { id: editEvent.id, ...form } : form
+      const actor = { actor_id: user?.id, actor_name: user?.name, actor_role: user?.role }
+      const body = editEvent ? { id: editEvent.id, ...form } : { ...form, ...actor }
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -124,11 +125,16 @@ export default function EventsPage() {
     setActionError('')
     try {
       const { event, action } = actionEvent
+      const actor = { actor_id: user?.id, actor_name: user?.name, actor_role: user?.role, event_name: event.name }
       let endpoint: string
       let method: 'POST' | 'DELETE' = 'POST'
-      if (action === 'close') endpoint = `/api/events/${event.id}/close`
-      else if (action === 'cancel') endpoint = `/api/events/${event.id}/cancel`
-      else {
+      let fetchOpts: RequestInit = { method }
+      if (action === 'close') {
+        endpoint = `/api/events/${event.id}/close`
+        fetchOpts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(actor) }
+      } else if (action === 'cancel') {
+        endpoint = `/api/events/${event.id}/cancel`
+      } else {
         method = 'DELETE'
         const qs = new URLSearchParams({
           id: event.id,
@@ -136,8 +142,9 @@ export default function EventsPage() {
           deleteSales: String(deleteSales),
         })
         endpoint = `/api/events?${qs.toString()}`
+        fetchOpts = { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(actor) }
       }
-      const res = await fetch(endpoint, { method })
+      const res = await fetch(endpoint, fetchOpts)
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error ?? 'Error')
       setActionEvent(null)

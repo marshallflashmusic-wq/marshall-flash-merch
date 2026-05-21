@@ -55,7 +55,7 @@ export default function SalesHistoryPage() {
   const [editPayment, setEditPayment] = useState<PaymentMethod>('efectivo')
   const [editNotes, setEditNotes] = useState('')
   const [editError, setEditError] = useState('')
-  const { isSaleMode, activeEvent } = useAppStore()
+  const { isSaleMode, activeEvent, user } = useAppStore()
   // En modo TPV el invitado solo puede ver ventas del evento activo.
   // Forzamos el filtro de evento en la consulta para que ni siquiera se
   // transmitan al cliente las ventas globales/rápidas.
@@ -120,7 +120,14 @@ export default function SalesHistoryPage() {
       const res = await fetch(`/api/sales?id=${sale.id}&restoreStock=${restoreStock}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ restorations }),
+        body: JSON.stringify({
+          restorations,
+          actor_id:   user?.id,
+          actor_name: user?.name,
+          actor_role: user?.role,
+          sale_total: sale.total_amount,
+          sale_event: sale.event?.name ?? null,
+        }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))

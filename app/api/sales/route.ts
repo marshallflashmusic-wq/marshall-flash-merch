@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import { logAudit } from '@/lib/audit'
 
 function getServiceClient() {
   return createClient(
@@ -224,12 +225,22 @@ export async function DELETE(request: NextRequest) {
 
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-  // Plan de restauración de almacén elegido por el usuario (opcional)
+  // Plan de restauración + actor info (opcionales desde el cliente)
   type WhRestoreItem = { product_id: string; variant_id: string | null; warehouse_id: string; quantity: number }
   let clientRestorations: WhRestoreItem[] | null = null
+  let actor_id: string | null = null
+  let actor_name: string | null = null
+  let actor_role = 'admin'
+  let sale_total: number | null = null
+  let sale_event: string | null = null
   try {
     const body = await request.json()
     if (Array.isArray(body.restorations)) clientRestorations = body.restorations
+    actor_id   = body.actor_id   ?? null
+    actor_name = body.actor_name ?? null
+    actor_role = body.actor_role ?? 'admin'
+    sale_total = body.sale_total ?? null
+    sale_event = body.sale_event ?? null
   } catch { /* sin body */ }
 
   if (restoreStock) {
@@ -343,5 +354,20 @@ export async function DELETE(request: NextRequest) {
 
   const { error } = await supabase.from('sales').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  if (actor_name) {
+    await logAudit(supabase, {
+      action: 'sale_deleted',
+      actor_id, actor_name, actor_role,
+      entity_type: 'sale',
+      entity_id: id,
+      entity_name: sale_event ? `Venta en ${sale_event}` : 'Venta rápida',
+      metadata: {
+        ...(sale_total != null ? { total_amount: sale_total } : {}),
+        restoreStock,
+      },
+    })
+  }
+
   return NextResponse.json({ success: true })
 }

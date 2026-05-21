@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import { logAudit } from '@/lib/audit'
 
 function getServiceClient() {
   return createClient(
@@ -18,7 +19,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const supabase = getServiceClient()
   const body = await request.json()
-  const { email, password, name, role } = body
+  const { email, password, name, role, actor_id, actor_name, actor_role } = body
 
   if (!email || !password || !name) {
     return NextResponse.json({ error: 'email, password y name son requeridos' }, { status: 400 })
@@ -35,5 +36,17 @@ export async function POST(request: NextRequest) {
   })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  if (actor_name) {
+    await logAudit(supabase, {
+      action: 'user_created',
+      actor_id, actor_name, actor_role: actor_role ?? 'boss',
+      entity_type: 'user',
+      entity_id: data.user?.id ?? null,
+      entity_name: name,
+      metadata: { email, role: resolvedRole },
+    })
+  }
+
   return NextResponse.json({ user: data.user })
 }

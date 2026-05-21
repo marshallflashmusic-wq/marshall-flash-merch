@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import { logAudit } from '@/lib/audit'
 
 function getServiceClient() {
   return createClient(
@@ -47,11 +48,19 @@ export async function POST(
   const supabase = getServiceClient()
   const { id } = await params
 
-  // Plan de restauración opcional desde el cliente
+  // Plan de restauración + actor (opcionales desde el cliente)
   let clientRestorations: RestoreItem[] | null = null
+  let actor_id: string | null = null
+  let actor_name: string | null = null
+  let actor_role = 'admin'
+  let event_name: string | null = null
   try {
     const body = await request.json()
     clientRestorations = body.restorations ?? null
+    actor_id   = body.actor_id   ?? null
+    actor_name = body.actor_name ?? null
+    actor_role = body.actor_role ?? 'admin'
+    event_name = body.event_name ?? null
   } catch { /* sin body */ }
 
   // Si no viene plan del cliente, leer inventario para LIFO automático
@@ -117,6 +126,17 @@ export async function POST(
         await upsertWarehouseStock(supabase, r.wh_id, row.product_id, row.variant_id, r.qty)
       }
     }
+  }
+
+  if (actor_name) {
+    await logAudit(supabase, {
+      action: 'event_closed',
+      actor_id, actor_name, actor_role,
+      entity_type: 'event',
+      entity_id: id,
+      entity_name: event_name,
+      metadata: {},
+    })
   }
 
   return NextResponse.json({ result: data })

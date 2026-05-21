@@ -54,6 +54,11 @@ export default function SettingsPage() {
         label: 'TPV',
         content: <div className="px-4 py-4"><TpvSessionsTab adminId={user?.id ?? null} /></div>,
       },
+      ...(user?.role === 'boss' ? [{
+        key: 'audit',
+        label: 'Auditoría',
+        content: <div className="px-4 py-4"><AuditTab /></div>,
+      }] : []),
     ] : []),
   ]
 
@@ -109,9 +114,12 @@ function GeneralTab({ user, onLogout, isAdmin }: { user: User | null; onLogout: 
           <div>
             <p className="text-white font-bold">{user?.name ?? 'Usuario'}</p>
             <p className="text-zinc-500 text-sm">{user?.email}</p>
-            <Badge variant={isAdmin ? 'warning' : 'info'} className="mt-1">
-              {isAdmin ? 'Admin' : 'Vendedor TPV'}
-            </Badge>
+            {user?.role === 'boss'
+              ? <span className="inline-block mt-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-500/20 text-purple-300 border border-purple-500/40 uppercase tracking-wide">Boss</span>
+              : <Badge variant={isAdmin ? 'warning' : 'info'} className="mt-1">
+                  {isAdmin ? 'Admin' : 'Vendedor TPV'}
+                </Badge>
+            }
           </div>
         </div>
       </Card>
@@ -189,7 +197,12 @@ function UsersTab({ currentUser }: { currentUser: User | null }) {
     const res = await fetch('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      body: JSON.stringify({
+        ...form,
+        actor_id:   currentUser?.id,
+        actor_name: currentUser?.name,
+        actor_role: currentUser?.role,
+      }),
     })
     const j = await res.json()
     if (!res.ok) {
@@ -213,7 +226,11 @@ function UsersTab({ currentUser }: { currentUser: User | null }) {
 
   const handleDelete = async (u: User) => {
     setDeleting(u.id)
-    await fetch(`/api/users/${u.id}`, { method: 'DELETE' })
+    await fetch(`/api/users/${u.id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actor_id: currentUser?.id, actor_name: currentUser?.name, actor_role: currentUser?.role }),
+    })
     setConfirmDelete(null)
     setDeleting(null)
     loadUsers()
@@ -341,6 +358,175 @@ function UsersTab({ currentUser }: { currentUser: User | null }) {
           </div>
         </div>
       </Modal>
+    </div>
+  )
+}
+
+// ─── Auditoría (solo Boss) ─────────────────────────────────────────────────
+
+type AuditLog = {
+  id: string
+  action: string
+  actor_id: string | null
+  actor_name: string
+  actor_role: string
+  entity_type: string
+  entity_id: string | null
+  entity_name: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+const ACTION_META: Record<string, { label: string; color: string }> = {
+  event_created:  { label: 'Concierto creado',   color: 'text-amber-400'  },
+  event_closed:   { label: 'Concierto cerrado',   color: 'text-blue-400'  },
+  event_deleted:  { label: 'Concierto eliminado', color: 'text-red-400'   },
+  sale_deleted:   { label: 'Venta eliminada',     color: 'text-red-400'   },
+  product_created:{ label: 'Artículo creado',     color: 'text-green-400' },
+  stock_adjusted: { label: 'Stock ajustado',      color: 'text-cyan-400'  },
+  user_created:   { label: 'Usuario creado',      color: 'text-purple-400'},
+  user_deleted:   { label: 'Usuario eliminado',   color: 'text-red-400'   },
+}
+
+const ACTION_FILTERS = [
+  { value: '', label: 'Todas' },
+  { value: 'event_created',  label: 'Conciertos' },
+  { value: 'event_closed',   label: 'Cierres' },
+  { value: 'event_deleted',  label: 'Borrados concierto' },
+  { value: 'sale_deleted',   label: 'Ventas eliminadas' },
+  { value: 'product_created',label: 'Artículos creados' },
+  { value: 'stock_adjusted', label: 'Stock ajustado' },
+  { value: 'user_created',   label: 'Usuarios creados' },
+  { value: 'user_deleted',   label: 'Usuarios eliminados' },
+]
+
+function AuditTab() {
+  const [logs, setLogs] = useState<AuditLog[]>([])
+  const [loading, setLoading] = useState(true)
+  const [actionFilter, setActionFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [total, setTotal] = useState(0)
+
+  const load = async () => {
+    setLoading(true)
+    const params = new URLSearchParams()
+    if (actionFilter) params.set('action', actionFilter)
+    if (dateFrom) params.set('date_from', dateFrom)
+    if (dateTo) params.set('date_to', dateTo)
+    const res = await fetch(`/api/audit-log?${params.toString()}`)
+    const j = await res.json()
+    setLogs(j.logs ?? [])
+    setTotal(j.total ?? 0)
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [actionFilter, dateFrom, dateTo]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fmt = (iso: string) => {
+    const d = new Date(iso)
+    return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit' })
+      + ' ' + d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+  }
+
+  const roleBadgeColor = (role: string) => {
+    if (role === 'boss') return 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+    if (role === 'admin') return 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+    return 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Filtro de acción */}
+      <div className="flex flex-wrap gap-2">
+        {ACTION_FILTERS.map(f => (
+          <button
+            key={f.value}
+            onClick={() => setActionFilter(f.value)}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+              actionFilter === f.value
+                ? 'border-white bg-white/10 text-white'
+                : 'border-zinc-700 text-zinc-500'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Filtro de fecha */}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Desde</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+            className="w-full mt-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-white"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Hasta</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+            className="w-full mt-1 bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-white"
+          />
+        </div>
+      </div>
+
+      {/* Contador */}
+      <p className="text-xs text-zinc-500">{total} registro{total !== 1 ? 's' : ''}</p>
+
+      {/* Lista */}
+      {loading ? (
+        <div className="flex justify-center py-10">
+          <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : logs.length === 0 ? (
+        <div className="flex flex-col items-center py-16 text-zinc-600">
+          <AlertCircle size={32} />
+          <p className="mt-2 text-sm">Sin registros</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {logs.map(log => {
+            const meta = ACTION_META[log.action]
+            return (
+              <Card key={log.id} padding="md">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-xs font-bold ${meta?.color ?? 'text-zinc-400'}`}>
+                        {meta?.label ?? log.action}
+                      </span>
+                      {log.entity_name && (
+                        <span className="text-zinc-400 text-xs truncate">— {log.entity_name}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-white text-xs font-medium">{log.actor_name}</span>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase border ${roleBadgeColor(log.actor_role)}`}>
+                        {log.actor_role}
+                      </span>
+                    </div>
+                    {Object.keys(log.metadata).length > 0 && (
+                      <p className="text-zinc-600 text-[10px] leading-relaxed">
+                        {Object.entries(log.metadata)
+                          .filter(([, v]) => v != null && v !== '')
+                          .map(([k, v]) => `${k}: ${v}`)
+                          .join(' · ')}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-zinc-600 text-[10px] shrink-0 whitespace-nowrap">{fmt(log.created_at)}</span>
+                </div>
+              </Card>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
