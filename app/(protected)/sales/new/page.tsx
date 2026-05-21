@@ -71,16 +71,23 @@ export default function NewSalePage() {
   const [saleError, setSaleError] = useState('')
   const [sizePickerProduct, setSizePickerProduct] = useState<Product | null>(null)
   const [packSizePicker, setPackSizePicker] = useState<Pack | null>(null)
-  const [warehouses, setWarehouses] = useState<{ id: string; name: string; color: string | null }[]>([])
+  const [warehouses, setWarehouses] = useState<{ id: string; name: string; color: string | null; totalUnits: number }[]>([])
   const [quickWarehouseId, setQuickWarehouseId] = useState('')
 
   useEffect(() => {
     fetch('/api/warehouses/overview', { cache: 'no-store' })
       .then(r => r.json())
       .then(j => {
-        const whs = j.warehouses ?? []
-        setWarehouses(whs)
-        if (whs.length === 1) setQuickWarehouseId(whs[0].id)
+        const whs: { id: string; name: string; color: string | null }[] = j.warehouses ?? []
+        const stockRows: { warehouse_id: string; quantity: number }[] = j.stock ?? []
+        const withTotals = whs.map(wh => ({
+          ...wh,
+          totalUnits: stockRows
+            .filter(s => s.warehouse_id === wh.id)
+            .reduce((sum, s) => sum + s.quantity, 0),
+        }))
+        setWarehouses(withTotals)
+        if (withTotals.length === 1) setQuickWarehouseId(withTotals[0].id)
       })
       .catch(() => {})
   }, [])
@@ -821,7 +828,7 @@ function CartModal({ open, onClose, notes, onNotesChange, onConfirm, warehouses,
   notes: string
   onNotesChange: (v: string) => void
   onConfirm: () => void
-  warehouses: { id: string; name: string; color: string | null }[]
+  warehouses: { id: string; name: string; color: string | null; totalUnits: number }[]
   quickWarehouseId: string
   onWarehouseChange: (id: string) => void
   isEventMode: boolean
@@ -908,9 +915,10 @@ function CartModal({ open, onClose, notes, onNotesChange, onConfirm, warehouses,
               onChange={e => onWarehouseChange(e.target.value)}
               className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white focus:outline-none focus:border-white text-sm appearance-none"
             >
-              <option value="">Sin almacén específico</option>
               {warehouses.map(wh => (
-                <option key={wh.id} value={wh.id}>{wh.name}</option>
+                <option key={wh.id} value={wh.id}>
+                  {wh.name} · {wh.totalUnits} ud{wh.totalUnits !== 1 ? 's' : ''}
+                </option>
               ))}
             </select>
           </div>
