@@ -71,6 +71,19 @@ export default function NewSalePage() {
   const [saleError, setSaleError] = useState('')
   const [sizePickerProduct, setSizePickerProduct] = useState<Product | null>(null)
   const [packSizePicker, setPackSizePicker] = useState<Pack | null>(null)
+  const [warehouses, setWarehouses] = useState<{ id: string; name: string; color: string | null }[]>([])
+  const [quickWarehouseId, setQuickWarehouseId] = useState('')
+
+  useEffect(() => {
+    fetch('/api/warehouses/overview', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => {
+        const whs = j.warehouses ?? []
+        setWarehouses(whs)
+        if (whs.length === 1) setQuickWarehouseId(whs[0].id)
+      })
+      .catch(() => {})
+  }, [])
 
   // Total de unidades en carrito para un producto (suma todas las tallas)
   const productQty = (productId: string) =>
@@ -93,6 +106,7 @@ export default function NewSalePage() {
       eventInventoryResolver: isEventMode
         ? (productId, variantId) => eventCatalog.getEventInventoryId(productId, variantId)
         : undefined,
+      quickSaleWarehouseId: !isEventMode ? quickWarehouseId || undefined : undefined,
     })
     if (result.success) {
       // Actualización optimista
@@ -410,6 +424,10 @@ export default function NewSalePage() {
         notes={saleNotes}
         onNotesChange={setSaleNotes}
         onConfirm={() => { setShowCart(false); setShowConfirm(true) }}
+        warehouses={warehouses}
+        quickWarehouseId={quickWarehouseId}
+        onWarehouseChange={setQuickWarehouseId}
+        isEventMode={isEventMode}
       />
 
       {/* Modal confirmación */}
@@ -797,12 +815,16 @@ function PackSizePickerModal({
 
 // ─── Modal carrito ──────────────────────────────────────────────────────────
 
-function CartModal({ open, onClose, notes, onNotesChange, onConfirm }: {
+function CartModal({ open, onClose, notes, onNotesChange, onConfirm, warehouses, quickWarehouseId, onWarehouseChange, isEventMode }: {
   open: boolean
   onClose: () => void
   notes: string
   onNotesChange: (v: string) => void
   onConfirm: () => void
+  warehouses: { id: string; name: string; color: string | null }[]
+  quickWarehouseId: string
+  onWarehouseChange: (id: string) => void
+  isEventMode: boolean
 }) {
   const cart = useCartStore()
 
@@ -873,6 +895,26 @@ function CartModal({ open, onClose, notes, onNotesChange, onConfirm }: {
             ))}
           </div>
         </div>
+
+        {/* Almacén de origen (solo en venta rápida con almacenes configurados) */}
+        {!isEventMode && warehouses.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-zinc-400 flex items-center gap-1.5">
+              <Building2 size={13} />
+              Almacén de origen
+            </label>
+            <select
+              value={quickWarehouseId}
+              onChange={e => onWarehouseChange(e.target.value)}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white focus:outline-none focus:border-white text-sm appearance-none"
+            >
+              <option value="">Sin almacén específico</option>
+              {warehouses.map(wh => (
+                <option key={wh.id} value={wh.id}>{wh.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Notas */}
         <div className="flex flex-col gap-1.5">

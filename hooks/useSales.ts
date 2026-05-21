@@ -17,7 +17,10 @@ export function useSales() {
     paymentMethod: PaymentMethod,
     eventId: string | null,
     notes?: string,
-    options?: { eventInventoryResolver?: (productId: string, variantId: string | null) => string | undefined }
+    options?: {
+      eventInventoryResolver?: (productId: string, variantId: string | null) => string | undefined
+      quickSaleWarehouseId?: string
+    }
   ): Promise<{ success: boolean; saleId?: string; error?: string }> => {
     // Protección doble envío: ignorar si ya hay una petición en vuelo
     if (submittingRef.current) return { success: false, error: 'Venta en proceso, espera un momento.' }
@@ -40,12 +43,14 @@ export function useSales() {
       }))
 
       const resolver = options?.eventInventoryResolver
+      const quickWh = options?.quickSaleWarehouseId
       const stockDecrements: {
         product_id: string
         quantity: number
         movement_type: string
         variant_id?: string
         event_inventory_id?: string
+        warehouse_id?: string
       }[] = []
       for (const item of items) {
         if (item.type === 'product' && item.product) {
@@ -56,6 +61,7 @@ export function useSales() {
             movement_type: 'sale',
             variant_id: item.variant_id,
             event_inventory_id: einvId,
+            warehouse_id: !einvId && quickWh ? quickWh : undefined,
           })
         } else if (item.type === 'pack' && item.pack?.items) {
           for (const packItem of item.pack.items) {
@@ -68,6 +74,7 @@ export function useSales() {
               movement_type: 'pack_sale',
               variant_id: variantId,
               event_inventory_id: einvId,
+              warehouse_id: !einvId && quickWh ? quickWh : undefined,
             })
           }
         }

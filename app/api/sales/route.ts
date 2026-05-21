@@ -151,6 +151,31 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Para ventas RÁPIDAS con almacén seleccionado, descontar warehouse_stock
+    const quickWarehouseDecrements = (stockDecrements ?? []).filter(
+      (d: { warehouse_id?: string; event_inventory_id?: string }) => !!d.warehouse_id && !d.event_inventory_id
+    ) as { warehouse_id: string; product_id: string; variant_id?: string; quantity: number }[]
+
+    for (const d of quickWarehouseDecrements) {
+      let q = supabase
+        .from('warehouse_stock')
+        .select('id, quantity')
+        .eq('warehouse_id', d.warehouse_id)
+        .eq('product_id', d.product_id)
+      if (d.variant_id) q = q.eq('variant_id', d.variant_id)
+      else q = q.is('variant_id', null)
+      const { data: row } = await q.maybeSingle()
+      if (!row) continue
+      const next = Math.max(0, (row.quantity ?? 0) - d.quantity)
+      if (next === 0) {
+        await supabase.from('warehouse_stock').delete().eq('id', row.id)
+      } else {
+        await supabase.from('warehouse_stock')
+          .update({ quantity: next, updated_at: new Date().toISOString() })
+          .eq('id', row.id)
+      }
+    }
+
     const saleId = (result as { sale_id: string; duplicate: boolean })?.sale_id
     return NextResponse.json({ sale: { id: saleId } })
   } catch (e) {

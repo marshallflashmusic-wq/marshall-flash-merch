@@ -215,6 +215,7 @@ export interface OfflineSale {
     movement_type?: string
     variant_id?: string
     event_inventory_id?: string
+    warehouse_id?: string
   }[]
   created_at: string
   pending_sync: boolean
