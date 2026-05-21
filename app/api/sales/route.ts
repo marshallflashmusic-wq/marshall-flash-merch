@@ -199,41 +199,19 @@ export async function DELETE(request: NextRequest) {
 
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-  // Antes de borrar la venta, guardamos los movimientos para poder devolver
-  // unidades a warehouse_stock del almacén origen.
-  type RestoreMov = { product_id: string; variant_id: string | null; quantity: number; warehouse_id: string }
-  let restoreToWarehouse: RestoreMov[] = []
-  if (restoreStock) {
-    const { data: movs } = await supabase
-      .from('inventory_movements')
-      .select('product_id, quantity, event_inventory_id')
-      .eq('reference_id', id)
-      .in('type', ['sale', 'pack_sale'])
-    const eventInvIds = Array.from(new Set((movs ?? []).map(m => m.event_inventory_id).filter(Boolean))) as string[]
-    let whByInv = new Map<string, { warehouse_id: string | null; variant_id: string | null }>()
-    if (eventInvIds.length > 0) {
-      const { data: einvRows } = await supabase
-        .from('event_inventory')
-        .select('id, warehouse_id, variant_id')
-        .in('id', eventInvIds)
-      whByInv = new Map((einvRows ?? []).map(r => [r.id, { warehouse_id: r.warehouse_id ?? null, variant_id: r.variant_id ?? null }]))
-    }
-    restoreToWarehouse = (movs ?? [])
-      .map(m => {
-        const inv = m.event_inventory_id ? whByInv.get(m.event_inventory_id) : undefined
-        return inv?.warehouse_id
-          ? { product_id: m.product_id, variant_id: inv.variant_id ?? null, quantity: m.quantity, warehouse_id: inv.warehouse_id }
-          : null
-      })
-      .filter((x): x is RestoreMov => !!x)
-  }
+  // Plan de restauración de almacén elegido por el usuario (opcional)
+  type WhRestoreItem = { product_id: string; variant_id: string | null; warehouse_id: string; quantity: number }
+  let clientRestorations: WhRestoreItem[] | null = null
+  try {
+    const body = await request.json()
+    if (Array.isArray(body.restorations)) clientRestorations = body.restorations
+  } catch { /* sin body */ }
 
   if (restoreStock) {
-    // restore_sale_stock revierte tanto ventas globales como de evento,
-    // usando inventory_movements como fuente de verdad.
+    // restore_sale_stock revierte ventas globales y de evento usando inventory_movements.
     const { error: rpcError } = await supabase.rpc('restore_sale_stock', { p_sale_id: id })
     if (rpcError) {
-      // Fallback al método antiguo si la función nueva no está disponible
+      // Fallback si la función no está disponible
       console.warn('[DELETE /api/sales] restore_sale_stock no disponible, usando fallback:', rpcError.message)
       const { data: items } = await supabase
         .from('sale_items')
@@ -267,27 +245,74 @@ export async function DELETE(request: NextRequest) {
     }
   }
 
-  // Devolver al almacén origen las unidades restauradas (solo si la venta era
-  // en concierto y el event_inventory tenía warehouse_id).
-  for (const mov of restoreToWarehouse) {
-    if (!mov.warehouse_id) continue
-    let q = supabase
-      .from('warehouse_stock')
-      .select('id, quantity')
-      .eq('warehouse_id', mov.warehouse_id)
-      .eq('product_id', mov.product_id)
-    if (mov.variant_id) q = q.eq('variant_id', mov.variant_id)
-    else q = q.is('variant_id', null)
-    const { data: row } = await q.maybeSingle()
-    if (row) {
-      await supabase
+  // Restaurar warehouse_stock: plan del cliente si existe, si no auto-detección
+  if (clientRestorations && clientRestorations.length > 0) {
+    for (const r of clientRestorations) {
+      if (!r.warehouse_id || r.quantity <= 0) continue
+      let q = supabase
         .from('warehouse_stock')
-        .update({ quantity: (row.quantity ?? 0) + mov.quantity, updated_at: new Date().toISOString() })
-        .eq('id', row.id)
-    } else {
-      await supabase
+        .select('id, quantity')
+        .eq('warehouse_id', r.warehouse_id)
+        .eq('product_id', r.product_id)
+      if (r.variant_id) q = q.eq('variant_id', r.variant_id)
+      else q = q.is('variant_id', null)
+      const { data: row } = await q.maybeSingle()
+      if (row) {
+        await supabase
+          .from('warehouse_stock')
+          .update({ quantity: (row.quantity ?? 0) + r.quantity, updated_at: new Date().toISOString() })
+          .eq('id', row.id)
+      } else {
+        await supabase
+          .from('warehouse_stock')
+          .insert({ warehouse_id: r.warehouse_id, product_id: r.product_id, variant_id: r.variant_id ?? null, quantity: r.quantity })
+      }
+    }
+  } else if (restoreStock) {
+    // Auto-detección: buscar warehouse_id en event_inventory a través de inventory_movements
+    type RestoreMov = { product_id: string; variant_id: string | null; quantity: number; warehouse_id: string }
+    const { data: movs } = await supabase
+      .from('inventory_movements')
+      .select('product_id, quantity, event_inventory_id')
+      .eq('reference_id', id)
+      .in('type', ['sale', 'pack_sale'])
+    const eventInvIds = Array.from(new Set((movs ?? []).map((m: { event_inventory_id?: string }) => m.event_inventory_id).filter(Boolean))) as string[]
+    let whByInv = new Map<string, { warehouse_id: string | null; variant_id: string | null }>()
+    if (eventInvIds.length > 0) {
+      const { data: einvRows } = await supabase
+        .from('event_inventory')
+        .select('id, warehouse_id, variant_id')
+        .in('id', eventInvIds)
+      whByInv = new Map((einvRows ?? []).map(r => [r.id, { warehouse_id: r.warehouse_id ?? null, variant_id: r.variant_id ?? null }]))
+    }
+    const restoreToWarehouse: RestoreMov[] = (movs ?? [])
+      .map((m: { product_id: string; quantity: number; event_inventory_id?: string }) => {
+        const inv = m.event_inventory_id ? whByInv.get(m.event_inventory_id) : undefined
+        return inv?.warehouse_id
+          ? { product_id: m.product_id, variant_id: inv.variant_id ?? null, quantity: m.quantity, warehouse_id: inv.warehouse_id }
+          : null
+      })
+      .filter((x): x is RestoreMov => !!x)
+
+    for (const mov of restoreToWarehouse) {
+      let q = supabase
         .from('warehouse_stock')
-        .insert({ warehouse_id: mov.warehouse_id, product_id: mov.product_id, variant_id: mov.variant_id, quantity: mov.quantity })
+        .select('id, quantity')
+        .eq('warehouse_id', mov.warehouse_id)
+        .eq('product_id', mov.product_id)
+      if (mov.variant_id) q = q.eq('variant_id', mov.variant_id)
+      else q = q.is('variant_id', null)
+      const { data: row } = await q.maybeSingle()
+      if (row) {
+        await supabase
+          .from('warehouse_stock')
+          .update({ quantity: (row.quantity ?? 0) + mov.quantity, updated_at: new Date().toISOString() })
+          .eq('id', row.id)
+      } else {
+        await supabase
+          .from('warehouse_stock')
+          .insert({ warehouse_id: mov.warehouse_id, product_id: mov.product_id, variant_id: mov.variant_id, quantity: mov.quantity })
+      }
     }
   }
 

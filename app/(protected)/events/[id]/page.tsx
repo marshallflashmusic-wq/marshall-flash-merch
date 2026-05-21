@@ -44,6 +44,11 @@ export default function EventDetailPage() {
   const [closeResult, setCloseResult] = useState<{ units_released: number; units_sold: number; lines: number } | null>(null)
   const [closeLoading, setCloseLoading] = useState(false)
   const [closeError, setCloseError] = useState('')
+  type RestorePlanItem = {
+    key: string; product_id: string; variant_id: string | null
+    label: string; quantity_remaining: number; include: boolean; quantity: number; warehouse_id: string
+  }
+  const [closeRestorePlan, setCloseRestorePlan] = useState<RestorePlanItem[]>([])
 
   // Almacenes + warehouse_stock para mostrar chips por almacén en cada artículo.
   type WhInfo = { id: string; name: string; color: string | null }
@@ -195,11 +200,42 @@ export default function EventDetailPage() {
     return { totalAssigned, totalSold, totalRemaining }
   }, [inventory])
 
+  const openCloseModal = () => {
+    const plan: RestorePlanItem[] = inventory
+      .filter(i => i.quantity_remaining > 0)
+      .map(i => {
+        const label = `${i.product_name ?? 'Artículo'}${i.variant_size ? ` · ${i.variant_size}` : ''}`
+        const defaultWh = i.warehouse_id ?? (warehouses.length === 1 ? warehouses[0].id : '')
+        return {
+          key: `${i.product_id}::${i.variant_id ?? ''}`,
+          product_id: i.product_id,
+          variant_id: i.variant_id ?? null,
+          label,
+          quantity_remaining: i.quantity_remaining,
+          include: !!defaultWh,
+          quantity: i.quantity_remaining,
+          warehouse_id: defaultWh ?? '',
+        }
+      })
+    setCloseRestorePlan(plan)
+    setCloseError('')
+    setCloseResult(null)
+    setCloseOpen(true)
+  }
+
   const handleClose = async () => {
     if (!eventId) return
     setCloseLoading(true); setCloseError('')
     try {
-      const res = await fetch(`/api/events/${eventId}/close`, { method: 'POST' })
+      const restorations = closeRestorePlan
+        .filter(r => r.include && r.warehouse_id && r.quantity > 0)
+        .map(r => ({ product_id: r.product_id, variant_id: r.variant_id, warehouse_id: r.warehouse_id, quantity: r.quantity }))
+
+      const res = await fetch(`/api/events/${eventId}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restorations }),
+      })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Error')
       setCloseResult(json.result)
@@ -343,7 +379,7 @@ export default function EventDetailPage() {
               </Button>
             )}
             {event.status === 'active' && (
-              <Button onClick={() => { setCloseError(''); setCloseResult(null); setCloseOpen(true) }} variant="outline" className="flex-1 text-amber-400 border-amber-900 hover:bg-amber-950/30">
+              <Button onClick={openCloseModal} variant="outline" className="flex-1 text-amber-400 border-amber-900 hover:bg-amber-950/30">
                 <Lock size={14} />Cerrar concierto
               </Button>
             )}
@@ -476,9 +512,54 @@ export default function EventDetailPage() {
             <div className="flex items-start gap-2 bg-amber-950/40 border border-amber-900 rounded-xl p-3">
               <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
               <p className="text-amber-300 text-sm">
-                Al cerrar, las <span className="font-bold">{summary.totalRemaining}</span> unidades NO vendidas dejan de estar reservadas y vuelven al inventario disponible. Las ventas registradas quedan ligadas al concierto para histórico.
+                Al cerrar, las <span className="font-bold">{summary.totalRemaining}</span> unidades no vendidas dejan de estar reservadas. Las ventas quedan ligadas al concierto para el histórico.
               </p>
             </div>
+
+            {closeRestorePlan.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-zinc-400 mb-2">Devolver a almacén (elige por artículo)</p>
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {closeRestorePlan.map((item, idx) => (
+                    <div key={item.key} className="flex items-center gap-2 bg-zinc-800/60 rounded-xl p-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setCloseRestorePlan(p => p.map((r, i) => i === idx ? { ...r, include: !r.include } : r))}
+                        className={`w-4 h-4 rounded shrink-0 border-2 flex items-center justify-center transition-colors ${item.include ? 'bg-white border-white' : 'border-zinc-500'}`}
+                      >
+                        {item.include && <Check size={10} className="text-black" strokeWidth={3} />}
+                      </button>
+                      <p className="text-white text-xs font-semibold flex-1 min-w-0 truncate">{item.label}</p>
+                      <span className="text-zinc-500 text-xs shrink-0">{item.quantity_remaining} ud</span>
+                      {item.include && (
+                        <>
+                          <input
+                            type="number"
+                            min={1}
+                            max={item.quantity_remaining}
+                            value={item.quantity}
+                            onChange={e => setCloseRestorePlan(p => p.map((r, i) => i === idx
+                              ? { ...r, quantity: Math.max(1, Math.min(r.quantity_remaining, parseInt(e.target.value) || 1)) }
+                              : r
+                            ))}
+                            className="w-11 bg-zinc-900 border border-zinc-700 rounded-lg py-1 px-1.5 text-white text-xs text-center focus:outline-none"
+                          />
+                          <select
+                            value={item.warehouse_id}
+                            onChange={e => setCloseRestorePlan(p => p.map((r, i) => i === idx ? { ...r, warehouse_id: e.target.value } : r))}
+                            className="w-28 bg-zinc-900 border border-zinc-700 rounded-lg py-1 px-2 text-white text-xs focus:outline-none truncate"
+                          >
+                            <option value="">Sin almacén</option>
+                            {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                          </select>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {closeError && <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2"><p className="text-red-400 text-sm">{closeError}</p></div>}
             <div className="flex gap-3">
               <Button variant="outline" fullWidth onClick={() => setCloseOpen(false)} disabled={closeLoading}>Cancelar</Button>

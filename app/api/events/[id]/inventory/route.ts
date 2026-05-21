@@ -9,6 +9,7 @@ function getServiceClient() {
 }
 
 type SB = ReturnType<typeof getServiceClient>
+type Alloc = { wh_id: string; qty: number }
 
 export async function GET(
   _request: NextRequest,
@@ -17,20 +18,27 @@ export async function GET(
   const supabase = getServiceClient()
   const { id } = await params
 
-  // Usamos la vista event_inventory_full + warehouse_id leído de la tabla base
   const [fullRes, baseRes] = await Promise.all([
     supabase.from('event_inventory_full').select('*').eq('event_id', id).order('product_name'),
-    supabase.from('event_inventory').select('id, warehouse_id').eq('event_id', id),
+    supabase.from('event_inventory').select('id, warehouse_id, warehouse_allocations').eq('event_id', id),
   ])
   if (fullRes.error) return NextResponse.json({ error: fullRes.error.message }, { status: 500 })
-  const whById = new Map<string, string | null>()
-  for (const r of baseRes.data ?? []) whById.set(r.id, r.warehouse_id ?? null)
-  const merged = (fullRes.data ?? []).map(row => ({ ...row, warehouse_id: whById.get(row.id) ?? null }))
+
+  const baseById = new Map<string, { warehouse_id: string | null; warehouse_allocations: Alloc[] }>()
+  for (const r of baseRes.data ?? []) {
+    baseById.set(r.id, {
+      warehouse_id: r.warehouse_id ?? null,
+      warehouse_allocations: (r.warehouse_allocations as Alloc[]) ?? [],
+    })
+  }
+  const merged = (fullRes.data ?? []).map(row => ({
+    ...row,
+    warehouse_id: baseById.get(row.id)?.warehouse_id ?? null,
+    warehouse_allocations: baseById.get(row.id)?.warehouse_allocations ?? [],
+  }))
   return NextResponse.json({ inventory: merged })
 }
 
-// Suma `delta` al warehouse_stock de (warehouseId, productId, variantId).
-// Acepta delta negativo. Si la fila no existe y delta > 0, la crea.
 async function addToWarehouseStock(
   supabase: SB,
   warehouseId: string,
@@ -84,23 +92,20 @@ export async function POST(
     return NextResponse.json({ error: 'Faltan parámetros (product_id, delta)' }, { status: 400 })
   }
 
-  // Si NO se especifica almacén y delta < 0, leer el warehouse_id de la fila existente
-  // (para devolver al almacén original).
-  let effectiveWarehouseId: string | null = warehouse_id ?? null
-  if (delta < 0 && !effectiveWarehouseId) {
-    let q = supabase
-      .from('event_inventory')
-      .select('warehouse_id')
-      .eq('event_id', eventId)
-      .eq('product_id', product_id)
-    if (variant_id) q = q.eq('variant_id', variant_id)
-    else q = q.is('variant_id', null)
-    const { data: row } = await q.maybeSingle()
-    effectiveWarehouseId = row?.warehouse_id ?? null
-  }
+  // Leer fila actual: warehouse_id y warehouse_allocations (stack LIFO)
+  let rowQ = supabase
+    .from('event_inventory')
+    .select('id, warehouse_id, warehouse_allocations')
+    .eq('event_id', eventId)
+    .eq('product_id', product_id)
+  if (variant_id) rowQ = rowQ.eq('variant_id', variant_id)
+  else rowQ = rowQ.is('variant_id', null)
+  const { data: existingRow } = await rowQ.maybeSingle()
 
-  // Pre-validación: si delta > 0 y se ha indicado almacén, comprobar que hay
-  // suficiente en ese almacén ANTES de tocar event_inventory.
+  const currentAllocs: Alloc[] = (existingRow?.warehouse_allocations as Alloc[]) ?? []
+  const effectiveWarehouseId: string | null = warehouse_id ?? null
+
+  // Pre-validación: si delta > 0 y se especificó almacén, verificar stock antes de tocar event_inventory
   if (delta > 0 && effectiveWarehouseId) {
     let q = supabase
       .from('warehouse_stock')
@@ -119,7 +124,7 @@ export async function POST(
     }
   }
 
-  // Llamar al RPC tradicional para validar y actualizar event_inventory
+  // RPC para validar y actualizar event_inventory (atómico en Postgres)
   const { data, error } = await supabase.rpc('assign_event_stock', {
     p_event_id: eventId,
     p_product_id: product_id,
@@ -129,52 +134,98 @@ export async function POST(
 
   if (error) {
     const msg = error.message ?? ''
-    if (msg.includes('STOCK_GLOBAL_INSUFICIENTE')) {
+    if (msg.includes('STOCK_GLOBAL_INSUFICIENTE'))
       return NextResponse.json({ error: 'No hay suficiente stock global para asignar.' }, { status: 409 })
-    }
-    if (msg.includes('STOCK_VARIANTE_INSUFICIENTE')) {
+    if (msg.includes('STOCK_VARIANTE_INSUFICIENTE'))
       return NextResponse.json({ error: 'No hay suficiente stock de esta talla.' }, { status: 409 })
-    }
-    if (msg.includes('NO_PUEDE_DESASIGNAR_VENDIDO')) {
+    if (msg.includes('NO_PUEDE_DESASIGNAR_VENDIDO'))
       return NextResponse.json({ error: 'No se puede desasignar: hay unidades ya vendidas en el evento.' }, { status: 409 })
-    }
-    if (msg.includes('EVENTO_CERRADO')) {
+    if (msg.includes('EVENTO_CERRADO'))
       return NextResponse.json({ error: 'El evento está cerrado o cancelado.' }, { status: 409 })
-    }
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 
-  // Actualizar warehouse_stock si se ha indicado almacén (o se ha podido inferir)
-  if (effectiveWarehouseId) {
-    // delta > 0 → quitar del almacén; delta < 0 → devolver al almacén
-    const whErr = await addToWarehouseStock(
-      supabase, effectiveWarehouseId, product_id, variant_id ?? null, -delta
-    )
+  // Actualizar warehouse_stock y el stack LIFO de allocations
+  let newAllocs = [...currentAllocs]
+  let newWarehouseId = existingRow?.warehouse_id ?? null
+
+  if (delta > 0 && effectiveWarehouseId) {
+    // Asignando stock desde un almacén: descontar del almacén
+    const whErr = await addToWarehouseStock(supabase, effectiveWarehouseId, product_id, variant_id ?? null, -delta)
     if (whErr) {
-      // Revertir el RPC para mantener consistencia
+      // Revertir el RPC
       await supabase.rpc('assign_event_stock', {
         p_event_id: eventId,
         p_product_id: product_id,
         p_variant_id: variant_id ?? null,
         p_delta: -delta,
       })
-      const human = whErr === 'STOCK_ALMACEN_INSUFICIENTE'
-        ? 'No hay stock suficiente en el almacén origen.'
-        : whErr
-      return NextResponse.json({ error: human }, { status: 409 })
+      return NextResponse.json({
+        error: whErr === 'STOCK_ALMACEN_INSUFICIENTE' ? 'No hay stock suficiente en el almacén origen.' : whErr,
+      }, { status: 409 })
     }
+    // Push al stack LIFO (merge si el último es el mismo almacén)
+    if (newAllocs.length > 0 && newAllocs[newAllocs.length - 1].wh_id === effectiveWarehouseId) {
+      newAllocs[newAllocs.length - 1] = {
+        wh_id: effectiveWarehouseId,
+        qty: newAllocs[newAllocs.length - 1].qty + delta,
+      }
+    } else {
+      newAllocs.push({ wh_id: effectiveWarehouseId, qty: delta })
+    }
+    newWarehouseId = effectiveWarehouseId
 
-    // Guardar warehouse_id en la fila event_inventory (cuando asignamos +)
-    if (delta > 0) {
-      let q = supabase
-        .from('event_inventory')
-        .update({ warehouse_id: effectiveWarehouseId, updated_at: new Date().toISOString() })
-        .eq('event_id', eventId)
-        .eq('product_id', product_id)
-      if (variant_id) q = q.eq('variant_id', variant_id)
-      else q = q.is('variant_id', null)
-      await q
+  } else if (delta < 0) {
+    // Devolviendo stock al almacén de origen (LIFO)
+    let toReturn = -delta // positivo
+
+    // Si se especificó almacén explícitamente, devolver directamente allí
+    if (effectiveWarehouseId) {
+      await addToWarehouseStock(supabase, effectiveWarehouseId, product_id, variant_id ?? null, toReturn)
+      // Ajustar el stack: quitar las unidades del stack en LIFO pero solo para el wh especificado
+      // En este caso simplificamos y vaciamos las unidades del stack genéricamente
+      let remaining = toReturn
+      while (remaining > 0 && newAllocs.length > 0) {
+        const top = newAllocs[newAllocs.length - 1]
+        if (top.qty <= remaining) { remaining -= top.qty; newAllocs.pop() }
+        else { newAllocs[newAllocs.length - 1] = { wh_id: top.wh_id, qty: top.qty - remaining }; remaining = 0 }
+      }
+    } else {
+      // LIFO puro: distribuir entre almacenes según el stack
+      const restorations: Alloc[] = []
+      while (toReturn > 0 && newAllocs.length > 0) {
+        const top = newAllocs[newAllocs.length - 1]
+        const take = Math.min(top.qty, toReturn)
+        restorations.push({ wh_id: top.wh_id, qty: take })
+        toReturn -= take
+        if (take === top.qty) newAllocs.pop()
+        else newAllocs[newAllocs.length - 1] = { wh_id: top.wh_id, qty: top.qty - take }
+      }
+      // Fallback: unidades sin stack conocido → usar warehouse_id genérico
+      if (toReturn > 0 && existingRow?.warehouse_id) {
+        restorations.push({ wh_id: existingRow.warehouse_id, qty: toReturn })
+      }
+      for (const r of restorations) {
+        await addToWarehouseStock(supabase, r.wh_id, product_id, variant_id ?? null, r.qty)
+      }
     }
+    newWarehouseId = newAllocs.length > 0 ? newAllocs[newAllocs.length - 1].wh_id : existingRow?.warehouse_id ?? null
+  }
+
+  // Persistir warehouse_allocations y warehouse_id actualizados
+  if (existingRow) {
+    let updateQ = supabase
+      .from('event_inventory')
+      .update({
+        warehouse_allocations: newAllocs,
+        warehouse_id: newWarehouseId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('event_id', eventId)
+      .eq('product_id', product_id)
+    if (variant_id) updateQ = updateQ.eq('variant_id', variant_id)
+    else updateQ = updateQ.is('variant_id', null)
+    await updateQ
   }
 
   return NextResponse.json({ result: data })

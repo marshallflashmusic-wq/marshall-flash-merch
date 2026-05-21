@@ -850,6 +850,17 @@ function AssignStockModal({ warehouse, products, variants, stock, onClose, onSav
     }
     return m
   })
+
+  // Refresca draft cuando el stock del padre cambia (p.ej. tras mover entre almacenes)
+  useEffect(() => {
+    const m: Record<string, number> = {}
+    for (const s of stock) {
+      if (s.warehouse_id !== warehouse.id) continue
+      const key = `${s.product_id}::${s.variant_id ?? ''}`
+      m[key] = s.quantity
+    }
+    setDraft(m)
+  }, [stock, warehouse.id])
   const [saving, setSaving] = useState(false)
   const [saveErr, setSaveErr] = useState('')
   const [search, setSearch] = useState('')
