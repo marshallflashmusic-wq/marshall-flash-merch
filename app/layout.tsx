@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import SplashScreen from '@/components/ui/SplashScreen'
 
 export const metadata: Metadata = {
   title: 'MyMerch',
@@ -34,6 +35,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
       <body className="h-full overflow-hidden bg-[#0a0a0a] text-white">
+        <SplashScreen />
         <script dangerouslySetInnerHTML={{ __html: `
           if ('serviceWorker' in navigator) {
             navigator.serviceWorker.getRegistrations().then(function(regs) {

@@ -45,10 +45,10 @@ export default function BottomNav() {
                 key={href}
                 href={href}
                 className={cn(
-                  'flex-1 flex flex-col items-center gap-1 py-2 rounded-2xl transition-all duration-150',
+                  'flex-1 flex flex-col items-center gap-1 py-2 rounded-2xl border transition-all duration-150',
                   active
-                    ? 'bg-white text-black shadow-lg shadow-white/10'
-                    : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                    ? 'border-white bg-white/10 text-white shadow-lg shadow-white/10'
+                    : 'border-zinc-700 text-zinc-400 hover:text-zinc-200'
                 )}
               >
                 <Icon size={22} strokeWidth={2.5} />
@@ -74,21 +74,21 @@ export default function BottomNav() {
                 'flex flex-col items-center gap-0.5 min-w-[52px] py-1 px-2 rounded-xl transition-all duration-150',
                 primary
                   ? cn(
-                      'bg-white text-black -mt-4 rounded-2xl px-5 py-2 shadow-lg shadow-white/10',
-                      active && 'bg-zinc-100'
+                      'bg-green-500 text-white -mt-4 rounded-2xl px-5 py-2 shadow-lg shadow-green-500/30 border-0',
+                      active && 'bg-green-400'
                     )
                   : cn(
-                      'text-zinc-500',
+                      'border',
                       active
-                        ? 'text-white bg-white/10 rounded-xl'
-                        : 'hover:text-zinc-300'
+                        ? 'border-white text-white bg-white/10'
+                        : 'border-zinc-700 text-zinc-400 hover:text-zinc-200'
                     )
               )}
             >
               <Icon size={primary ? 24 : 20} strokeWidth={primary ? 2.5 : active ? 2.5 : 1.5} />
               <span className={cn(
                 'text-[10px] font-medium',
-                primary ? 'text-black' : active ? 'text-white font-semibold' : ''
+                primary ? 'text-white' : active ? 'text-white font-semibold' : ''
               )}>{label}</span>
             </Link>
           )
