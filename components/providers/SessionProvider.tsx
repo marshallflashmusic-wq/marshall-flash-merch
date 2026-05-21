@@ -48,14 +48,14 @@ export default function SessionProvider({ children }: { children: React.ReactNod
     const loadProfile = async (userId: string, email?: string) => {
       const name = email ? email.split('@')[0] : 'Admin'
 
-      const buildAdmin = (base?: Partial<User>): User => ({
+      const buildUser = (base?: Partial<User>): User => ({
         id: userId,
         email: email ?? '',
         name,
+        role: 'admin',
         active: true,
         created_at: new Date().toISOString(),
-        ...base,
-        role: 'admin', // siempre admin, después del spread
+        ...base, // el rol real de la BD sobreescribe el default
       })
 
       // Admin logueado con Supabase → nunca en modo venta
@@ -69,10 +69,7 @@ export default function SessionProvider({ children }: { children: React.ReactNod
         .single()
 
       if (data) {
-        setUser(buildAdmin(data as Partial<User>))
-        if ((data as User).role !== 'admin') {
-          await supabase.from('profiles').update({ role: 'admin' }).eq('id', userId)
-        }
+        setUser(buildUser(data as Partial<User>))
         return
       }
 
@@ -82,10 +79,9 @@ export default function SessionProvider({ children }: { children: React.ReactNod
           .upsert({ id: userId, email: email ?? '', name, role: 'admin', active: true })
           .select('*')
           .single()
-        setUser(created ? buildAdmin(created as Partial<User>) : buildAdmin())
+        setUser(created ? buildUser(created as Partial<User>) : buildUser())
       } else {
-        // Cualquier otro error — construir usuario mínimo con rol admin
-        setUser(buildAdmin())
+        setUser(buildUser())
       }
     }
 

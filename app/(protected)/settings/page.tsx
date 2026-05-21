@@ -545,6 +545,7 @@ function TpvSessionsTab({ adminId }: { adminId: string | null }) {
   const [sessions, setSessions] = useState<TpvSession[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [purging, setPurging] = useState(false)
   const [hours, setHours] = useState(6)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [, forceUpdate] = useState(0)
@@ -587,6 +588,13 @@ function TpvSessionsTab({ adminId }: { adminId: string | null }) {
   const handleInvalidate = async (id: string) => {
     await fetch(`/api/tpv-sessions?id=${id}`, { method: 'DELETE' })
     loadSessions()
+  }
+
+  const handlePurgeExpired = async () => {
+    setPurging(true)
+    await fetch('/api/tpv-sessions?purge_expired=true', { method: 'DELETE' })
+    await loadSessions()
+    setPurging(false)
   }
 
   const copyPin = (pin: string, id: string) => {
@@ -688,7 +696,7 @@ function TpvSessionsTab({ adminId }: { adminId: string | null }) {
               <p className="text-xs font-semibold text-zinc-600 uppercase tracking-wider mb-2">
                 Expiradas ({expired.length})
               </p>
-              <div className="space-y-2 opacity-50">
+              <div className="space-y-2 opacity-50 mb-3">
                 {expired.map(session => (
                   <Card key={session.id} padding="none">
                     <div className="flex items-center gap-3 p-3">
@@ -707,6 +715,16 @@ function TpvSessionsTab({ adminId }: { adminId: string | null }) {
                   </Card>
                 ))}
               </div>
+              <Button
+                variant="outline"
+                fullWidth
+                loading={purging}
+                onClick={handlePurgeExpired}
+                className="text-red-400 border-red-900 hover:bg-red-900/20"
+              >
+                <Trash2 size={15} />
+                Borrar PINs caducados ({expired.length})
+              </Button>
             </div>
           )}
         </>

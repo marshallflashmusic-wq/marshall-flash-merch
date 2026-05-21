@@ -58,6 +58,16 @@ export async function DELETE(request: NextRequest) {
   const supabase = getServiceClient()
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')
+  const purgeExpired = searchParams.get('purge_expired') === 'true'
+
+  if (purgeExpired) {
+    const { error, count } = await supabase
+      .from('tpv_sessions')
+      .delete({ count: 'exact' })
+      .lt('expires_at', new Date().toISOString())
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ success: true, deleted: count ?? 0 })
+  }
 
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
