@@ -47,7 +47,7 @@ export default function SettingsPage() {
       {
         key: 'users',
         label: 'Usuarios',
-        content: <div className="px-4 py-4"><UsersTab /></div>,
+        content: <div className="px-4 py-4"><UsersTab currentUser={user} /></div>,
       },
       {
         key: 'sessions',
@@ -161,18 +161,22 @@ function GeneralTab({ user, onLogout, isAdmin }: { user: User | null; onLogout: 
   )
 }
 
-function UsersTab() {
+function UsersTab({ currentUser }: { currentUser: User | null }) {
+  const isBoss = currentUser?.role === 'boss'
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<User | null>(null)
   const [form, setForm] = useState({ email: '', name: '', password: '', role: 'staff' })
   const [showPassword, setShowPassword] = useState(false)
+  const [formError, setFormError] = useState('')
 
   const loadUsers = async () => {
-    const supabase = createClient()
-    const { data } = await supabase.from('profiles').select('*').order('name')
-    setUsers(data ?? [])
+    const res = await fetch('/api/users')
+    const j = await res.json()
+    setUsers(j.users ?? [])
     setLoading(false)
   }
 
@@ -181,14 +185,16 @@ function UsersTab() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
-    const supabase = createClient()
-    const { error } = await supabase.auth.admin.createUser({
-      email: form.email,
-      password: form.password,
-      email_confirm: true,
-      user_metadata: { name: form.name, role: form.role },
+    setFormError('')
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
     })
-    if (!error) {
+    const j = await res.json()
+    if (!res.ok) {
+      setFormError(j.error ?? 'Error al crear usuario')
+    } else {
       setShowModal(false)
       setForm({ email: '', name: '', password: '', role: 'staff' })
       loadUsers()
@@ -196,15 +202,35 @@ function UsersTab() {
     setSaving(false)
   }
 
-  const handleToggle = async (user: User) => {
-    const supabase = createClient()
-    await supabase.from('profiles').update({ active: !user.active }).eq('id', user.id)
+  const handleToggle = async (u: User) => {
+    await fetch(`/api/users/${u.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active: !u.active }),
+    })
     loadUsers()
   }
 
+  const handleDelete = async (u: User) => {
+    setDeleting(u.id)
+    await fetch(`/api/users/${u.id}`, { method: 'DELETE' })
+    setConfirmDelete(null)
+    setDeleting(null)
+    loadUsers()
+  }
+
+  const roleBadge = (role: string) => {
+    if (role === 'boss') return <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-500/20 text-purple-300 border border-purple-500/40 uppercase tracking-wide">Boss</span>
+    if (role === 'admin') return <Badge variant="warning">Admin</Badge>
+    return <Badge variant="info">Staff</Badge>
+  }
+
+  const availableRoles = isBoss ? ['staff', 'admin', 'boss'] : ['staff', 'admin']
+  const roleLabel: Record<string, string> = { staff: 'Staff', admin: 'Admin', boss: 'Boss' }
+
   return (
     <div className="space-y-3">
-      <Button onClick={() => setShowModal(true)} fullWidth variant="outline">
+      <Button onClick={() => { setFormError(''); setShowModal(true) }} fullWidth variant="outline">
         <Plus size={16} />
         Crear usuario
       </Button>
@@ -217,29 +243,37 @@ function UsersTab() {
         users.map(u => (
           <Card key={u.id} padding="md">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-zinc-800 flex items-center justify-center">
-                <span className="font-bold text-zinc-400">{u.name?.[0]?.toUpperCase()}</span>
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${u.role === 'boss' ? 'bg-purple-500/20' : 'bg-zinc-800'}`}>
+                <span className={`font-bold text-base ${u.role === 'boss' ? 'text-purple-300' : 'text-zinc-400'}`}>{u.name?.[0]?.toUpperCase()}</span>
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-white font-medium text-sm truncate">{u.name}</p>
                 <p className="text-zinc-500 text-xs truncate">{u.email}</p>
               </div>
               <div className="flex items-center gap-2">
-                <Badge variant={u.role === 'admin' ? 'warning' : 'info'}>
-                  {u.role === 'admin' ? 'Admin' : 'Staff'}
-                </Badge>
+                {roleBadge(u.role)}
                 <button
                   onClick={() => handleToggle(u)}
-                  className={`p-1.5 rounded-lg ${u.active ? 'bg-green-900/50 text-green-400' : 'bg-zinc-800 text-zinc-500'}`}
+                  disabled={u.id === currentUser?.id}
+                  className={`p-1.5 rounded-lg transition-colors ${u.active ? 'bg-green-900/50 text-green-400' : 'bg-zinc-800 text-zinc-500'} disabled:opacity-30`}
                 >
                   {u.active ? <Check size={14} /> : <X size={14} />}
                 </button>
+                {isBoss && u.id !== currentUser?.id && (
+                  <button
+                    onClick={() => setConfirmDelete(u)}
+                    className="p-1.5 rounded-lg bg-red-900/40 text-red-400 hover:bg-red-900/70 transition-colors"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             </div>
           </Card>
         ))
       )}
 
+      {/* Modal crear usuario */}
       <Modal open={showModal} onClose={() => setShowModal(false)} title="Nuevo usuario" size="md">
         <form onSubmit={handleCreate} className="space-y-4">
           <Input label="Nombre *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
@@ -258,26 +292,54 @@ function UsersTab() {
           />
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-zinc-300">Rol *</label>
-            <div className="grid grid-cols-2 gap-2">
-              {['staff', 'admin'].map(r => (
+            <div className={`grid gap-2 ${availableRoles.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+              {availableRoles.map(r => (
                 <button
                   key={r}
                   type="button"
                   onClick={() => setForm(f => ({ ...f, role: r }))}
-                  className={`py-2.5 px-4 rounded-xl border text-sm font-medium transition-colors ${
-                    form.role === r ? 'border-white bg-white/10 text-white' : 'border-zinc-700 text-zinc-400'
+                  className={`py-2.5 px-3 rounded-xl border text-sm font-medium transition-colors ${
+                    form.role === r
+                      ? r === 'boss' ? 'border-purple-400 bg-purple-500/20 text-purple-200' : 'border-white bg-white/10 text-white'
+                      : 'border-zinc-700 text-zinc-400'
                   }`}
                 >
-                  {r === 'admin' ? 'Admin' : 'Staff'}
+                  {roleLabel[r]}
                 </button>
               ))}
             </div>
           </div>
+          {formError && (
+            <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2">
+              <p className="text-red-400 text-xs">{formError}</p>
+            </div>
+          )}
           <div className="flex gap-3 pt-2">
             <Button type="button" variant="outline" fullWidth onClick={() => setShowModal(false)}>Cancelar</Button>
             <Button type="submit" fullWidth loading={saving}>Crear usuario</Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Modal confirmar eliminación */}
+      <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Eliminar usuario" size="sm">
+        <div className="space-y-4">
+          <p className="text-zinc-300 text-sm">
+            ¿Eliminar a <span className="text-white font-bold">{confirmDelete?.name}</span> ({confirmDelete?.email})?
+            Esta acción no se puede deshacer.
+          </p>
+          <div className="flex gap-3">
+            <Button variant="outline" fullWidth onClick={() => setConfirmDelete(null)}>Cancelar</Button>
+            <Button
+              fullWidth
+              loading={deleting === confirmDelete?.id}
+              onClick={() => confirmDelete && handleDelete(confirmDelete)}
+              className="bg-red-600 hover:bg-red-500 text-white border-red-600"
+            >
+              Eliminar
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   )

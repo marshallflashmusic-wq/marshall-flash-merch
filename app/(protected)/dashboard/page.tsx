@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import {
   ShoppingBag, Package, AlertTriangle,
   Banknote, CreditCard, Smartphone, Wallet, LogOut,
-  Warehouse,
+  Warehouse, CalendarDays, HelpCircle,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useAppStore } from '@/store/appStore'
@@ -230,6 +230,20 @@ export default function DashboardPage() {
         {/* Acceso rápido */}
         <div>
           <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Acceso rápido</h2>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <Card interactive onClick={() => router.push('/events')} padding="md" className="bg-amber-500/10 border-amber-500/30">
+              <div className="flex flex-col items-center gap-2 py-2">
+                <CalendarDays size={26} className="text-amber-400" />
+                <span className="text-xs font-bold text-amber-300 text-center leading-tight">Conciertos</span>
+              </div>
+            </Card>
+            <Card interactive onClick={() => router.push('/help')} padding="md">
+              <div className="flex flex-col items-center gap-2 py-2">
+                <HelpCircle size={26} className="text-zinc-400" />
+                <span className="text-xs font-bold text-zinc-300 text-center leading-tight">Ayuda</span>
+              </div>
+            </Card>
+          </div>
           <div className="grid grid-cols-3 gap-3">
             <Card interactive onClick={() => router.push('/sales/new')} padding="md" className="bg-white/5 border-white/20">
               <div className="flex flex-col items-center gap-2 py-2">
