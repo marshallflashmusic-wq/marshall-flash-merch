@@ -45,55 +45,28 @@ export default function SessionProvider({ children }: { children: React.ReactNod
   useEffect(() => {
     const supabase = createClient()
 
-    const loadProfile = async (userId: string, email?: string) => {
-      const name = email ? email.split('@')[0] : 'Admin'
-
-      const buildUser = (base?: Partial<User>): User => ({
-        id: userId,
-        email: email ?? '',
-        name,
-        role: 'admin',
-        active: true,
-        created_at: new Date().toISOString(),
-        ...base, // el rol real de la BD sobreescribe el default
-      })
-
-      // Admin logueado con Supabase → nunca en modo venta
+    const loadProfile = async () => {
       setSaleMode(false)
       setTpvSession(null)
-
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single()
-
-      if (data) {
-        setUser(buildUser(data as Partial<User>))
-        return
-      }
-
-      if (error?.code === 'PGRST116') {
-        const { data: created } = await supabase
-          .from('profiles')
-          .upsert({ id: userId, email: email ?? '', name, role: 'admin', active: true })
-          .select('*')
-          .single()
-        setUser(created ? buildUser(created as Partial<User>) : buildUser())
-      } else {
-        setUser(buildUser())
+      try {
+        const res = await fetch('/api/me')
+        if (!res.ok) return
+        const { profile } = await res.json()
+        if (profile) setUser(profile as User)
+      } catch {
+        // Sin conexión: mantener estado actual
       }
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user && !session.user.is_anonymous) {
-        loadProfile(session.user.id, session.user.email ?? '')
+        loadProfile()
       }
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user && !session.user.is_anonymous) {
-        loadProfile(session.user.id, session.user.email ?? '')
+        loadProfile()
       } else if (!session?.user) {
         setUser(null)
       }
