@@ -50,6 +50,9 @@ export default function EventDetailPage() {
   type WhStockRow = { warehouse_id: string; product_id: string; variant_id: string | null; quantity: number }
   const [warehouses, setWarehouses] = useState<WhInfo[]>([])
   const [whStock, setWhStock] = useState<WhStockRow[]>([])
+  // Stack LIFO: qué unidades vienen de qué almacén, para poder devolverlas al restar.
+  // Key: "product_id::variant_id|''" → [{wh_id, qty}, ...]
+  const [whStack, setWhStack] = useState<Map<string, { wh_id: string; qty: number }[]>>(new Map())
   // Checkbox "mostrar almacenes". Default: visible si hay >1 almacén.
   const [showWh, setShowWh] = useState<boolean>(false)
   const loadWh = useCallback(async () => {
@@ -110,6 +113,18 @@ export default function EventDetailPage() {
   const getInv = (productId: string, variantId: string | null) =>
     invIndex.get(`${productId}::${variantId ?? ''}`)
 
+  // Inicializar stack LIFO desde el inventario cargado.
+  useEffect(() => {
+    const newStack = new Map<string, { wh_id: string; qty: number }[]>()
+    for (const inv of inventory) {
+      if (inv.warehouse_id && inv.quantity_assigned > 0) {
+        const key = `${inv.product_id}::${inv.variant_id ?? ''}`
+        newStack.set(key, [{ wh_id: inv.warehouse_id, qty: inv.quantity_assigned }])
+      }
+    }
+    setWhStack(newStack)
+  }, [inventory])
+
   const handleAdjust = async (
     productId: string,
     variantId: string | null,
@@ -119,14 +134,48 @@ export default function EventDetailPage() {
     const key = `${productId}::${variantId ?? ''}`
     setSavingMap(m => ({ ...m, [key]: true }))
     setErrorMap(m => ({ ...m, [key]: '' }))
-    // Si no se pasa explícito y solo hay 1 almacén, usarlo por defecto.
-    const wh = fromWarehouseId ?? (warehouses.length === 1 ? warehouses[0].id : null)
-    const res = await adjust(productId, variantId, delta, wh)
+
+    // Determinar almacén efectivo:
+    // • Si el usuario pulsó directamente un chip de almacén → fromWarehouseId
+    // • Si hay solo 1 almacén → ese
+    // • Si es una resta (delta < 0) y hay stack LIFO → sacar del último almacén
+    let effectiveWh = fromWarehouseId ?? (warehouses.length === 1 ? warehouses[0].id : null)
+    if (delta < 0 && !fromWarehouseId && warehouses.length > 1) {
+      const stack = whStack.get(key) ?? []
+      if (stack.length > 0) effectiveWh = stack[stack.length - 1].wh_id
+    }
+
+    const res = await adjust(productId, variantId, delta, effectiveWh)
     if (!res.success) {
       setErrorMap(m => ({ ...m, [key]: res.error ?? 'Error' }))
       setTimeout(() => setErrorMap(m => ({ ...m, [key]: '' })), 3000)
     } else {
-      // Refrescar stock de almacenes para que los chips se actualicen
+      // Actualizar stack LIFO local
+      if (effectiveWh) {
+        setWhStack(prev => {
+          const newMap = new Map(prev)
+          const stack = [...(prev.get(key) ?? [])]
+          if (delta > 0) {
+            const last = stack[stack.length - 1]
+            if (last && last.wh_id === effectiveWh) {
+              stack[stack.length - 1] = { ...last, qty: last.qty + delta }
+            } else {
+              stack.push({ wh_id: effectiveWh!, qty: delta })
+            }
+          } else if (delta < 0) {
+            let remaining = Math.abs(delta)
+            while (remaining > 0 && stack.length > 0) {
+              const last = stack[stack.length - 1]
+              const take = Math.min(last.qty, remaining)
+              remaining -= take
+              if (last.qty - take <= 0) stack.pop()
+              else stack[stack.length - 1] = { ...last, qty: last.qty - take }
+            }
+          }
+          newMap.set(key, stack)
+          return newMap
+        })
+      }
       loadWh()
     }
     setSavingMap(m => ({ ...m, [key]: false }))

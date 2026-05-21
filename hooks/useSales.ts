@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { savePendingSale, getPendingSales, deleteSyncedSale } from '@/lib/offline/db'
 import { generateId } from '@/lib/utils'
 import { useAppStore } from '@/store/appStore'
+import { createClient } from '@/lib/supabase/client'
 import type { Sale, SaleFilters, CartItem, PaymentMethod, OfflineSale } from '@/types'
 
 export function useSales() {
@@ -205,6 +206,17 @@ export function useSalesHistory(filters: SaleFilters = {}) {
   }, [filters.date_from, filters.date_to, filters.event_id, filters.user_id, filters.payment_method, filters.amount_min, filters.amount_max])
 
   useEffect(() => { loadSales() }, [loadSales])
+
+  // Realtime: cuando hay filtro por evento, actualizar al instante al crear/borrar ventas
+  useEffect(() => {
+    if (!filters.event_id) return
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`sales-event-rt-${filters.event_id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales', filter: `event_id=eq.${filters.event_id}` }, loadSales)
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [filters.event_id, loadSales])
 
   return { sales, loading, total, refetch: loadSales }
 }

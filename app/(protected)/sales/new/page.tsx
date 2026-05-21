@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ShoppingCart, Plus, Minus, Trash2, Package, Check,
@@ -145,12 +145,13 @@ export default function NewSalePage() {
     router.push('/login')
   }
 
-  // Cada vez que se entra a /sales/new (admin o TPV) mostramos el selector
-  // de modo "Evento vs Venta rápida". El tpvFlow vive solo en memoria, no se
-  // persiste — al recargar/navegar, vuelve a aparecer la pregunta.
+  // Admin: al entrar a /sales/new siempre muestra el selector de modo.
+  // TPV: preserva el flujo actual al cambiar de pestaña (no resetea).
   useEffect(() => {
-    setTpvFlow(null)
-    setActiveEvent(null)
+    if (!isSaleMode) {
+      setTpvFlow(null)
+      setActiveEvent(null)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -282,20 +283,16 @@ export default function NewSalePage() {
           )}
         </div>
         {isSaleMode ? (
-          <button
-            onClick={handleChangeMode}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white text-[10px] font-medium shrink-0"
-          >
-            <RotateCcw size={11} />Cambiar
-          </button>
-        ) : isEventMode ? (
-          <button
-            onClick={handleSwitchToQuick}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white text-black text-[10px] font-bold shrink-0"
-          >
-            <Zap size={11} fill="currentColor" />Venta rápida
-          </button>
-        ) : (
+          /* TPV en concierto: sin botón de cambio de modo */
+          isEventMode ? null : (
+            <button
+              onClick={handleChangeMode}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white text-[10px] font-medium shrink-0"
+            >
+              <RotateCcw size={11} />Cambiar
+            </button>
+          )
+        ) : isEventMode ? null : (
           <button
             onClick={handleSwitchToEvent}
             className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500 text-black text-[10px] font-bold shrink-0"
@@ -1044,7 +1041,16 @@ function EventPicker({ onPick, onBack, onExit, backLabel = 'Atrás' }: {
   backLabel?: string
 }) {
   const { events, loading } = useEvents()
+  const { isSaleMode } = useAppStore()
   const activeEvents = events.filter(e => e.status === 'active')
+  const autoPickedRef = useRef(false)
+
+  // TPV: si hay exactamente 1 evento activo, seleccionarlo automáticamente.
+  useEffect(() => {
+    if (loading || autoPickedRef.current || !isSaleMode || activeEvents.length !== 1) return
+    autoPickedRef.current = true
+    onPick(activeEvents[0])
+  }, [loading, isSaleMode, activeEvents, onPick])
 
   return (
     <div className="h-full flex flex-col bg-[#0a0a0a]">

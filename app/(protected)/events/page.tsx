@@ -3,11 +3,11 @@ import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   CalendarDays, MapPin, Building2, Plus, Edit2, X, Play, Lock,
-  PackageCheck, Trash2, Ban, ChevronRight,
+  PackageCheck, Trash2, Ban, ChevronRight, TrendingUp, ShoppingBag, Coins,
 } from 'lucide-react'
 import { useEvents } from '@/hooks/useEvents'
 import { useAppStore } from '@/store/appStore'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatCurrency } from '@/lib/utils'
 import TopBar from '@/components/layout/TopBar'
 import Card from '@/components/ui/Card'
 import Badge from '@/components/ui/Badge'
@@ -15,7 +15,7 @@ import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import Input from '@/components/ui/Input'
 import SwipeableTabs from '@/components/ui/SwipeableTabs'
-import type { Event, EventStatus } from '@/types'
+import type { Event, EventStatus, Sale } from '@/types'
 
 type FilterKey = 'active' | 'upcoming' | 'closed'
 
@@ -34,6 +34,11 @@ export default function EventsPage() {
   const [actionError, setActionError] = useState('')
   const [deleteRestoreStock, setDeleteRestoreStock] = useState(true)
   const [deleteSales, setDeleteSales] = useState(true)
+
+  // Resumen de concierto cerrado
+  const [summaryEvent, setSummaryEvent] = useState<Event | null>(null)
+  const [summarySales, setSummarySales] = useState<Sale[]>([])
+  const [summaryLoading, setSummaryLoading] = useState(false)
 
   const openNew = () => {
     setEditEvent(null)
@@ -144,6 +149,20 @@ export default function EventsPage() {
     }
   }
 
+  const openClosedSummary = async (event: Event) => {
+    setSummaryEvent(event)
+    setSummarySales([])
+    setSummaryLoading(true)
+    try {
+      const res = await fetch(`/api/sales?event_id=${event.id}`)
+      if (res.ok) {
+        const j = await res.json()
+        setSummarySales(j.sales ?? [])
+      }
+    } catch { /* silencioso */ }
+    setSummaryLoading(false)
+  }
+
   const openAction = (event: Event, action: 'close' | 'cancel' | 'delete') => {
     setActionError('')
     setDeleteRestoreStock(true)
@@ -184,9 +203,9 @@ export default function EventsPage() {
         onChange={k => setFilter(k as FilterKey)}
         panelClassName="px-4 py-4 space-y-3"
         tabs={[
-          { key: 'active', label: <FilterLabel text="Activos" count={counts.active} />, content: <EventList loading={loading} events={filtered} onEdit={openEdit} onActivate={handleActivate} onReopen={handleReopen} onPrepare={(e) => router.push(`/events/${e.id}`)} onAskAction={openAction} onCreate={openNew} /> },
-          { key: 'upcoming', label: <FilterLabel text="Próximos" count={counts.upcoming} />, content: <EventList loading={loading} events={filtered} onEdit={openEdit} onActivate={handleActivate} onReopen={handleReopen} onPrepare={(e) => router.push(`/events/${e.id}`)} onAskAction={openAction} onCreate={openNew} /> },
-          { key: 'closed', label: <FilterLabel text="Cerrados" count={counts.closed} />, content: <EventList loading={loading} events={filtered} onEdit={openEdit} onActivate={handleActivate} onReopen={handleReopen} onPrepare={(e) => router.push(`/events/${e.id}`)} onAskAction={openAction} onCreate={openNew} /> },
+          { key: 'active', label: <FilterLabel text="Activos" count={counts.active} />, content: <EventList loading={loading} events={filtered} onEdit={openEdit} onActivate={handleActivate} onReopen={handleReopen} onPrepare={(e) => router.push(`/events/${e.id}`)} onAskAction={openAction} onCreate={openNew} onOpenSummary={openClosedSummary} /> },
+          { key: 'upcoming', label: <FilterLabel text="Próximos" count={counts.upcoming} />, content: <EventList loading={loading} events={filtered} onEdit={openEdit} onActivate={handleActivate} onReopen={handleReopen} onPrepare={(e) => router.push(`/events/${e.id}`)} onAskAction={openAction} onCreate={openNew} onOpenSummary={openClosedSummary} /> },
+          { key: 'closed', label: <FilterLabel text="Cerrados" count={counts.closed} />, content: <EventList loading={loading} events={filtered} onEdit={openEdit} onActivate={handleActivate} onReopen={handleReopen} onPrepare={(e) => router.push(`/events/${e.id}`)} onAskAction={openAction} onCreate={openNew} onOpenSummary={openClosedSummary} /> },
         ]}
       />
 
@@ -267,6 +286,83 @@ export default function EventsPage() {
           </div>
         </div>
       </Modal>
+      {/* Modal resumen de concierto cerrado */}
+      <Modal open={!!summaryEvent} onClose={() => setSummaryEvent(null)} title={summaryEvent?.name ?? ''} size="md">
+        {summaryLoading ? (
+          <div className="flex justify-center py-10">
+            <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : (
+          <ClosedEventSummary event={summaryEvent} sales={summarySales} />
+        )}
+      </Modal>
+    </div>
+  )
+}
+
+function ClosedEventSummary({ event, sales }: { event: Event | null; sales: Sale[] }) {
+  if (!event) return null
+  const totalRevenue = sales.reduce((a, s) => a + s.total_amount, 0)
+  const totalProfit = sales.reduce((a, s) => a + s.profit, 0)
+  const totalItems = sales.reduce((a, s) => a + (s.items?.reduce((b, i) => b + i.quantity, 0) ?? 0), 0)
+
+  // Agrupación de artículos vendidos
+  const itemCounts = new Map<string, { name: string; qty: number }>()
+  for (const sale of sales) {
+    for (const item of sale.items ?? []) {
+      const name = item.product?.name ?? item.pack?.name ?? '?'
+      const key = item.product_id ?? item.pack_id ?? name
+      const prev = itemCounts.get(key) ?? { name, qty: 0 }
+      itemCounts.set(key, { name, qty: prev.qty + item.quantity })
+    }
+  }
+  const sortedItems = [...itemCounts.values()].sort((a, b) => b.qty - a.qty)
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 text-zinc-400 text-xs">
+        <CalendarDays size={13} />{formatDate(event.date)}
+        <span>·</span>
+        <MapPin size={13} />{event.city}
+        <span>·</span>
+        <Building2 size={13} />{event.venue}
+      </div>
+
+      {sales.length === 0 ? (
+        <p className="text-zinc-500 text-sm text-center py-6">Sin ventas registradas</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
+              <ShoppingBag size={16} className="mx-auto mb-1 text-zinc-500" />
+              <p className="text-white font-black text-xl">{sales.length}</p>
+              <p className="text-zinc-500 text-[10px] uppercase tracking-wider">Ventas</p>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
+              <TrendingUp size={16} className="mx-auto mb-1 text-zinc-500" />
+              <p className="text-white font-black text-lg leading-tight">{formatCurrency(totalRevenue)}</p>
+              <p className="text-zinc-500 text-[10px] uppercase tracking-wider">Ingresos</p>
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
+              <Coins size={16} className="mx-auto mb-1 text-zinc-500" />
+              <p className={`font-black text-lg leading-tight ${totalProfit < 0 ? 'text-red-400' : 'text-green-400'}`}>{formatCurrency(totalProfit)}</p>
+              <p className="text-zinc-500 text-[10px] uppercase tracking-wider">Beneficio</p>
+            </div>
+          </div>
+
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+            <p className="text-zinc-500 text-xs uppercase tracking-wider mb-2">{totalItems} artículos vendidos</p>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {sortedItems.map(it => (
+                <div key={it.name} className="flex items-center justify-between">
+                  <span className="text-white text-sm truncate">{it.name}</span>
+                  <span className="text-amber-400 font-bold text-sm shrink-0 ml-2">{it.qty} ud</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -281,7 +377,7 @@ function FilterLabel({ text, count }: { text: string; count: number }) {
 }
 
 function EventList({
-  loading, events, onEdit, onActivate, onReopen, onPrepare, onAskAction, onCreate,
+  loading, events, onEdit, onActivate, onReopen, onPrepare, onAskAction, onCreate, onOpenSummary,
 }: {
   loading: boolean
   events: Event[]
@@ -291,6 +387,7 @@ function EventList({
   onPrepare: (e: Event) => void
   onAskAction: (e: Event, action: 'close' | 'cancel' | 'delete') => void
   onCreate: () => void
+  onOpenSummary: (e: Event) => void
 }) {
   const { user } = useAppStore()
   if (loading) {
@@ -314,14 +411,15 @@ function EventList({
           onActivate={() => onActivate(event)}
           onReopen={() => onReopen(event)}
           onPrepare={() => onPrepare(event)}
-          onAskAction={(action) => onAskAction(event, action)} />
+          onAskAction={(action) => onAskAction(event, action)}
+          onOpenSummary={() => onOpenSummary(event)} />
       ))}
     </>
   )
 }
 
 function EventCard({
-  event, isAdmin, onEdit, onActivate, onReopen, onPrepare, onAskAction,
+  event, isAdmin, onEdit, onActivate, onReopen, onPrepare, onAskAction, onOpenSummary,
 }: {
   event: Event
   isAdmin: boolean
@@ -330,12 +428,18 @@ function EventCard({
   onReopen: () => void
   onPrepare: () => void
   onAskAction: (action: 'close' | 'cancel' | 'delete') => void
+  onOpenSummary: () => void
 }) {
   const status: EventStatus = event.status ?? 'upcoming'
+  const isClosed = status === 'closed' || status === 'cancelled'
 
   return (
     <Card padding="none" className={status === 'active' ? 'border-amber-500 bg-amber-500/5' : ''}>
-      <div className="p-4">
+      {/* Card header — pulsable para ver resumen en cerrados */}
+      <div
+        className={`p-4 ${isClosed ? 'cursor-pointer active:bg-white/5 transition-colors' : ''}`}
+        onClick={isClosed ? onOpenSummary : undefined}
+      >
         <div className="flex items-start gap-3">
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${status === 'active' ? 'bg-amber-500/20' : 'bg-zinc-800'}`}>
             <CalendarDays size={20} className={status === 'active' ? 'text-amber-500' : 'text-zinc-500'} />
@@ -352,6 +456,9 @@ function EventCard({
             </div>
             {event.notes && <p className="text-xs text-zinc-600 mt-1.5 italic">{event.notes}</p>}
           </div>
+          {isClosed && (
+            <ChevronRight size={16} className="text-zinc-600 shrink-0 mt-0.5" />
+          )}
         </div>
       </div>
 
@@ -359,6 +466,12 @@ function EventCard({
         {(status === 'upcoming' || status === 'active') && (
           <button onClick={onPrepare} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-amber-400 hover:bg-amber-500/10 transition-colors">
             <PackageCheck size={13} />Stock concierto
+            <ChevronRight size={13} />
+          </button>
+        )}
+        {isClosed && (
+          <button onClick={onOpenSummary} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800 transition-colors">
+            <TrendingUp size={13} />Ver resumen
             <ChevronRight size={13} />
           </button>
         )}

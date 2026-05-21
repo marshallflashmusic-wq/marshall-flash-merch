@@ -90,6 +90,7 @@ export interface EventInventoryItem {
   quantity_assigned: number
   quantity_sold: number
   quantity_remaining: number
+  warehouse_id?: string | null
   product_name?: string
   product_image?: string | null
   product_sale_price?: number

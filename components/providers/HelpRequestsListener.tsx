@@ -31,10 +31,12 @@ function ensureAudioCtx() {
   } catch { return null }
 }
 
-function playBeep() {
+async function playBeep() {
   const ctx = sharedAudioCtx ?? ensureAudioCtx()
   if (!ctx) return
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {})
+  try {
+    if (ctx.state !== 'running') await ctx.resume()
+  } catch { return }
   try {
     const o = ctx.createOscillator()
     const g = ctx.createGain()
@@ -56,19 +58,23 @@ export default function HelpRequestsListener() {
   const [toasts, setToasts] = useState<HelpRequest[]>([])
   const seenIds = useRef<Set<string>>(new Set())
 
-  // Desbloquea audio en la primera interacción del usuario (requisito iOS/Safari).
+  // Desbloquea audio en cada interacción (persistente) y al volver al primer plano.
+  // iOS suspende el AudioContext al ir a background; visibilitychange lo reanuda.
   useEffect(() => {
     const unlock = () => {
       const ctx = ensureAudioCtx()
       if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {})
-      window.removeEventListener('pointerdown', unlock)
-      window.removeEventListener('keydown', unlock)
     }
-    window.addEventListener('pointerdown', unlock, { once: true })
-    window.addEventListener('keydown', unlock, { once: true })
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') unlock()
+    }
+    window.addEventListener('pointerdown', unlock)
+    window.addEventListener('touchstart', unlock)
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       window.removeEventListener('pointerdown', unlock)
-      window.removeEventListener('keydown', unlock)
+      window.removeEventListener('touchstart', unlock)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [])
 

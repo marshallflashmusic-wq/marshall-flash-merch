@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import {
   Warehouse, Plus, Edit2, Trash2, Boxes, Package,
-  ChevronDown, AlertTriangle, Check, Download, RotateCcw,
+  ChevronDown, AlertTriangle, Check, Download, RotateCcw, ArrowRightLeft,
 } from 'lucide-react'
 import TopBar from '@/components/layout/TopBar'
 import Card from '@/components/ui/Card'
@@ -81,6 +81,23 @@ export default function WarehousesPage() {
   const [fillResult, setFillResult] = useState<{ id: string; units: number } | null>(null)
   const [unassignedOpen, setUnassignedOpen] = useState(false)
   const [reconciling, setReconciling] = useState(false)
+
+  // Mover stock entre almacenes
+  interface MoveRow {
+    from_warehouse_id: string
+    from_warehouse_name: string
+    product_id: string
+    product_name: string
+    image_url: string | null
+    variant_id: string | null
+    size: string | null
+    available: number
+  }
+  const [moveRow, setMoveRow] = useState<MoveRow | null>(null)
+  const [moveToWhId, setMoveToWhId] = useState('')
+  const [moveQty, setMoveQty] = useState(1)
+  const [moving, setMoving] = useState(false)
+  const [moveErr, setMoveErr] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -265,6 +282,33 @@ export default function WarehousesPage() {
       alert(e instanceof Error ? e.message : 'Error al conciliar')
     } finally {
       setReconciling(false)
+    }
+  }
+
+  const handleMove = async () => {
+    if (!moveRow || !moveToWhId || moveQty <= 0) return
+    setMoveErr('')
+    setMoving(true)
+    try {
+      const res = await fetch('/api/warehouses/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from_warehouse_id: moveRow.from_warehouse_id,
+          to_warehouse_id: moveToWhId,
+          product_id: moveRow.product_id,
+          variant_id: moveRow.variant_id ?? null,
+          quantity: moveQty,
+        }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Error')
+      setMoveRow(null)
+      load()
+    } catch (e) {
+      setMoveErr(e instanceof Error ? e.message : 'Error de red')
+    } finally {
+      setMoving(false)
     }
   }
 
@@ -671,8 +715,80 @@ export default function WarehousesPage() {
           stock={stock}
           onClose={() => setAssignWh(null)}
           onSaved={() => { load() }}
+          onMoveRequest={(row) => {
+            setMoveRow(row)
+            setMoveToWhId(warehouses.find(w => w.id !== row.from_warehouse_id)?.id ?? '')
+            setMoveQty(1)
+            setMoveErr('')
+          }}
         />
       )}
+
+      {/* Modal mover stock entre almacenes */}
+      <Modal open={!!moveRow} onClose={() => !moving && setMoveRow(null)} title="Mover a otro almacén" size="sm">
+        {moveRow && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 bg-zinc-800/60 rounded-xl p-2.5">
+              <div className="w-10 h-10 rounded-lg bg-zinc-800 overflow-hidden shrink-0">
+                {moveRow.image_url
+                  ? <img src={moveRow.image_url} alt={moveRow.product_name} className="w-full h-full object-cover" />
+                  : <div className="w-full h-full flex items-center justify-center"><Package size={16} className="text-zinc-600" /></div>}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white text-sm font-semibold truncate">{moveRow.product_name}</p>
+                <p className="text-zinc-500 text-xs">
+                  {moveRow.size ? `Talla ${moveRow.size} · ` : ''}En {moveRow.from_warehouse_name}: {moveRow.available} ud
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-zinc-400">Destino</label>
+              <div className="grid grid-cols-1 gap-1.5 max-h-40 overflow-y-auto">
+                {warehouses.filter(w => w.id !== moveRow.from_warehouse_id).map(w => (
+                  <button
+                    key={w.id}
+                    type="button"
+                    onClick={() => setMoveToWhId(w.id)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-colors text-left ${
+                      moveToWhId === w.id ? 'border-white bg-white/5' : 'border-zinc-700 hover:border-zinc-500'
+                    }`}
+                  >
+                    <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: w.color ?? '#71717a' }} />
+                    <span className="text-white text-sm">{w.name}</span>
+                    {moveToWhId === w.id && <Check size={14} className="ml-auto text-white" strokeWidth={3} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-zinc-400">Unidades a mover (máx {moveRow.available})</label>
+              <input
+                type="number"
+                min={1}
+                max={moveRow.available}
+                value={moveQty}
+                onChange={e => setMoveQty(Math.max(1, Math.min(moveRow.available, parseInt(e.target.value) || 1)))}
+                className="bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white text-sm focus:outline-none focus:border-white"
+              />
+            </div>
+
+            {moveErr && (
+              <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2">
+                <p className="text-red-400 text-sm">{moveErr}</p>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button variant="outline" fullWidth onClick={() => setMoveRow(null)} disabled={moving}>Cancelar</Button>
+              <Button fullWidth onClick={handleMove} loading={moving} disabled={!moveToWhId || moveQty <= 0}>
+                <ArrowRightLeft size={14} />Mover
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
@@ -704,13 +820,25 @@ function ColorPicker({ label, value, onChange }: { label?: string; value: string
   )
 }
 
-function AssignStockModal({ warehouse, products, variants, stock, onClose, onSaved }: {
+interface MoveRequestRow {
+  from_warehouse_id: string
+  from_warehouse_name: string
+  product_id: string
+  product_name: string
+  image_url: string | null
+  variant_id: string | null
+  size: string | null
+  available: number
+}
+
+function AssignStockModal({ warehouse, products, variants, stock, onClose, onSaved, onMoveRequest }: {
   warehouse: Warehouse
   products: Product[]
   variants: Variant[]
   stock: StockRow[]
   onClose: () => void
   onSaved: () => void
+  onMoveRequest: (row: MoveRequestRow) => void
 }) {
   // Estado local: cantidad asignada en este almacén por (product_id, variant_id|null)
   const [draft, setDraft] = useState<Record<string, number>>(() => {
@@ -874,6 +1002,24 @@ function AssignStockModal({ warehouse, products, variants, stock, onClose, onSav
                             onChange={e => setQty(p.id, v.id, parseInt(e.target.value) || 0)}
                             className="w-full bg-zinc-800 border border-zinc-700 rounded-md py-1 px-1.5 text-white text-sm text-center mt-1 focus:outline-none focus:border-white"
                           />
+                          {here > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => onMoveRequest({
+                                from_warehouse_id: warehouse.id,
+                                from_warehouse_name: warehouse.name,
+                                product_id: p.id,
+                                product_name: p.name,
+                                image_url: p.image_url,
+                                variant_id: v.id,
+                                size: v.size,
+                                available: here,
+                              })}
+                              className="mt-1 w-full flex items-center justify-center gap-0.5 text-[9px] text-zinc-500 hover:text-amber-400 transition-colors"
+                            >
+                              <ArrowRightLeft size={9} />Mover
+                            </button>
+                          )}
                         </div>
                       )
                     })}
@@ -890,6 +1036,24 @@ function AssignStockModal({ warehouse, products, variants, stock, onClose, onSav
                       className="flex-1 bg-zinc-800 border border-zinc-700 rounded-md py-1.5 px-2 text-white text-sm focus:outline-none focus:border-white"
                     />
                     <span className="text-zinc-600 text-xs shrink-0">máx {maxFor(p.id, null)}</span>
+                    {(draft[`${p.id}::`] ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => onMoveRequest({
+                          from_warehouse_id: warehouse.id,
+                          from_warehouse_name: warehouse.name,
+                          product_id: p.id,
+                          product_name: p.name,
+                          image_url: p.image_url,
+                          variant_id: null,
+                          size: null,
+                          available: draft[`${p.id}::`] ?? 0,
+                        })}
+                        className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-amber-400 transition-colors shrink-0"
+                      >
+                        <ArrowRightLeft size={11} />Mover
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
