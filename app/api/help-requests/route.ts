@@ -47,12 +47,24 @@ export async function POST(request: NextRequest) {
   }
   const role = from_role === 'admin' ? 'admin' : 'tpv'
 
+  // Verificar que el event_id referenciado existe; si no, almacenar null
+  // (puede ocurrir si el evento se cerró/eliminó mientras el TPV estaba activo)
+  let resolvedEventId: string | null = event_id ?? null
+  if (resolvedEventId) {
+    const { data: ev } = await supabase
+      .from('events')
+      .select('id')
+      .eq('id', resolvedEventId)
+      .maybeSingle()
+    if (!ev) resolvedEventId = null
+  }
+
   const { data, error } = await supabase
     .from('help_requests')
     .insert({
       seller_name: String(seller_name).trim(),
       tpv_session_id: tpv_session_id ?? null,
-      event_id: event_id ?? null,
+      event_id: resolvedEventId,
       message: message ? String(message).trim() : null,
       status: 'pending',
       from_role: role,
