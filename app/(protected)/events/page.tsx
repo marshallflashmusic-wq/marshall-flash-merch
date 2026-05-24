@@ -198,7 +198,7 @@ export default function EventsPage() {
       <TopBar
         title="Conciertos"
         subtitle={`${events.length} concierto${events.length !== 1 ? 's' : ''}`}
-        actions={user?.role === 'admin' && (
+        actions={(user?.role === 'admin' || user?.role === 'boss') && (
           <button onClick={openNew} className="p-2 rounded-xl bg-amber-500 text-black">
             <Plus size={18} strokeWidth={2.5} />
           </button>
@@ -413,7 +413,7 @@ function EventList({
     <>
       {events.map(event => (
         <EventCard key={event.id} event={event}
-          isAdmin={user?.role === 'admin'}
+          isAdmin={user?.role === 'admin' || user?.role === 'boss'}
           onEdit={() => onEdit(event)}
           onActivate={() => onActivate(event)}
           onReopen={() => onReopen(event)}

@@ -317,7 +317,7 @@ export default function EventDetailPage() {
   }
 
   const isClosed = event.status === 'closed' || event.status === 'cancelled'
-  const isAdmin = user?.role === 'admin'
+  const isAdmin = user?.role === 'admin' || user?.role === 'boss'
 
   return (
     <div className="h-full flex flex-col bg-[#0a0a0a]">
