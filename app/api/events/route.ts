@@ -224,6 +224,72 @@ export async function DELETE(request: NextRequest) {
     }
   }
 
+  // Devolver el SOBRANTE (stock asignado pero no vendido) al almacén origen.
+  // Tras restaurar ventas, quantity_sold queda a 0; el leftover real es quantity_assigned.
+  // Distribuimos usando warehouse_allocations (LIFO) o, como fallback, event_inventory.warehouse_id.
+  if (restoreStock) {
+    type Alloc = { wh_id: string; qty: number }
+    type EinvRow = {
+      product_id: string
+      variant_id: string | null
+      quantity_assigned: number
+      quantity_sold: number
+      warehouse_id: string | null
+      warehouse_allocations: Alloc[] | null
+    }
+    const { data: einvRows } = await supabase
+      .from('event_inventory')
+      .select('product_id, variant_id, quantity_assigned, quantity_sold, warehouse_id, warehouse_allocations')
+      .eq('event_id', id)
+
+    for (const row of (einvRows ?? []) as EinvRow[]) {
+      const leftover = (row.quantity_assigned ?? 0) - (row.quantity_sold ?? 0)
+      if (leftover <= 0) continue
+
+      const allocs: Alloc[] = Array.isArray(row.warehouse_allocations) ? [...row.warehouse_allocations] : []
+      const plan: { wh_id: string; qty: number }[] = []
+      let toReturn = leftover
+      while (toReturn > 0 && allocs.length > 0) {
+        const top = allocs[allocs.length - 1]
+        const take = Math.min(top.qty, toReturn)
+        plan.push({ wh_id: top.wh_id, qty: take })
+        toReturn -= take
+        if (take === top.qty) allocs.pop()
+        else allocs[allocs.length - 1] = { wh_id: top.wh_id, qty: top.qty - take }
+      }
+      if (toReturn > 0 && row.warehouse_id) {
+        plan.push({ wh_id: row.warehouse_id, qty: toReturn })
+      }
+
+      for (const p of plan) {
+        if (p.qty <= 0) continue
+        let q = supabase
+          .from('warehouse_stock')
+          .select('id, quantity')
+          .eq('warehouse_id', p.wh_id)
+          .eq('product_id', row.product_id)
+        if (row.variant_id) q = q.eq('variant_id', row.variant_id)
+        else q = q.is('variant_id', null)
+        const { data: ws } = await q.maybeSingle()
+        if (ws) {
+          await supabase
+            .from('warehouse_stock')
+            .update({ quantity: (ws.quantity ?? 0) + p.qty, updated_at: new Date().toISOString() })
+            .eq('id', ws.id)
+        } else {
+          await supabase
+            .from('warehouse_stock')
+            .insert({
+              warehouse_id: p.wh_id,
+              product_id: row.product_id,
+              variant_id: row.variant_id,
+              quantity: p.qty,
+            })
+        }
+      }
+    }
+  }
+
   await supabase.from('event_inventory').delete().eq('event_id', id)
   const { error } = await supabase.from('events').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
