@@ -12,7 +12,9 @@ interface HelpRequest {
   event_id: string | null
   status: 'pending' | 'resolved'
   from_role?: 'tpv' | 'admin'
+  from_user_id?: string | null
   target_session_id?: string | null
+  target_user_id?: string | null
   created_at: string
   event?: { id: string; name: string } | null
 }
@@ -93,11 +95,11 @@ export default function HelpRequestsListener() {
     dismiss(id)
   }, [dismiss])
 
-  // Carga inicial: avisos pendientes existentes (solo from_role=tpv)
+  // Carga inicial: avisos pendientes del TPV (todos) + mensajes dirigidos a este admin/boss
   useEffect(() => {
-    if (!isAdmin) return
+    if (!isAdmin || !user?.id) return
     let cancelled = false
-    fetch('/api/help-requests?status=pending&from_role=tpv').then(r => r.json()).then(j => {
+    fetch(`/api/help-requests?status=pending&inbox_user=${user.id}`).then(r => r.json()).then(j => {
       if (cancelled) return
       const reqs: HelpRequest[] = j.requests ?? []
       if (reqs.length > 0) {
@@ -106,21 +108,28 @@ export default function HelpRequestsListener() {
       }
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [isAdmin])
+  }, [isAdmin, user?.id])
 
-  // Realtime: nuevos inserts del TPV → admin
+  // Realtime: TPV → admin/boss + mensajes de otros admin/boss dirigidos a este user
   useEffect(() => {
-    if (!isAdmin) return
+    if (!isAdmin || !user?.id) return
     const supabase = createClient()
     const channel = supabase
-      .channel('help_requests_admin_toast')
+      .channel('help_requests_admin_toast_' + user.id)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'help_requests' },
         (payload) => {
           const row = payload.new as HelpRequest
-          // Solo nos interesan avisos del TPV al admin (no los que envió el propio admin)
-          if (row.from_role === 'admin') return
+          // Ignorar lo que envió el propio user
+          if (row.from_user_id && row.from_user_id === user.id) return
+          // TPV → admin/boss: siempre nos interesa (a no ser que sea dirigido a otro user)
+          if (row.from_role === 'tpv') {
+            if (row.target_user_id && row.target_user_id !== user.id) return
+          } else {
+            // admin/boss → ?: solo si va dirigido a este user
+            if (row.target_user_id !== user.id) return
+          }
           if (seenIds.current.has(row.id)) return
           seenIds.current.add(row.id)
           setToasts(prev => [row, ...prev].slice(0, 5))
@@ -130,7 +139,7 @@ export default function HelpRequestsListener() {
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [isAdmin])
+  }, [isAdmin, user?.id])
 
   if (!isAdmin || toasts.length === 0) return null
 

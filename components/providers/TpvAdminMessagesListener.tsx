@@ -10,6 +10,7 @@ interface AdminMessage {
   message: string | null
   from_role?: 'tpv' | 'admin'
   target_session_id: string | null
+  target_user_id?: string | null
   created_at: string
 }
 
@@ -118,6 +119,8 @@ export default function TpvAdminMessagesListener() {
         (payload) => {
           const row = payload.new as AdminMessage
           if (row.from_role !== 'admin') return
+          // Si el mensaje va dirigido a un usuario admin/boss, no es para este TPV
+          if (row.target_user_id) return
           if (row.target_session_id && row.target_session_id !== sessionId) return
           if (seenIds.current.has(row.id)) return
           seenIds.current.add(row.id)
