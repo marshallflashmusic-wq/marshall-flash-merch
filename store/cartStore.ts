@@ -12,6 +12,7 @@ interface CartStore {
   updateQuantity: (id: string, quantity: number) => void
   setPaymentMethod: (method: PaymentMethod) => void
   setEventId: (id: string | null) => void
+  setItemWarehouse: (id: string, warehouseId: string | null) => void
   clearCart: () => void
   total: () => number
   totalCost: () => number
@@ -114,6 +115,9 @@ export const useCartStore = create<CartStore>((set, get) => ({
 
   setPaymentMethod: (method) => set({ paymentMethod: method }),
   setEventId: (id) => set({ eventId: id }),
+  setItemWarehouse: (id, warehouseId) => {
+    set({ items: get().items.map(i => i.id === id ? { ...i, warehouse_id: warehouseId ?? undefined } : i) })
+  },
   clearCart: () => set({ items: [], paymentMethod: 'efectivo' }),
 
   total: () => get().items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0),

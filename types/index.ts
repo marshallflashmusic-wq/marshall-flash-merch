@@ -185,6 +185,8 @@ export interface CartItem {
   size?: string
   // Pack con artículos textiles
   packSizeSelections?: PackSizeSelection[]
+  // Almacén de origen elegido para venta rápida (por item)
+  warehouse_id?: string
 }
 
 export interface DashboardStats {

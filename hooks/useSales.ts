@@ -36,13 +36,14 @@ export function useSales() {
       const quickWh = options?.quickSaleWarehouseId
 
       // Resolver warehouse de origen por sale_item. Para ventas de evento el
-      // server lo deriva desde event_inventory.warehouse_id (no podemos saberlo
-      // aquí sin más consultas). Para ventas rápidas usamos quickWh.
+      // server lo deriva desde event_inventory.warehouse_id. Para ventas
+      // rápidas usamos item.warehouse_id (almacén elegido en el carrito por
+      // línea); si no hay, fallback a quickWh (compat).
       const resolveWarehouseForItem = (item: CartItem): string | null => {
         if (item.type === 'product' && item.product) {
           const einvId = resolver?.(item.product.id, item.variant_id ?? null)
           if (einvId) return null
-          return quickWh ?? null
+          return item.warehouse_id ?? quickWh ?? null
         }
         if (item.type === 'pack' && item.pack?.items) {
           const anyEinv = item.pack.items.some(pi => {
@@ -50,7 +51,7 @@ export function useSales() {
             return !!resolver?.(pi.product_id, sizeSel?.variant_id ?? null)
           })
           if (anyEinv) return null
-          return quickWh ?? null
+          return item.warehouse_id ?? quickWh ?? null
         }
         return null
       }
@@ -74,6 +75,9 @@ export function useSales() {
         warehouse_id?: string
       }[] = []
       for (const item of items) {
+        // Almacén efectivo para esta línea: el elegido en el carrito si lo hay,
+        // si no fallback al global de la venta rápida.
+        const itemQuickWh = item.warehouse_id ?? quickWh
         if (item.type === 'product' && item.product) {
           const einvId = resolver?.(item.product.id, item.variant_id ?? null)
           stockDecrements.push({
@@ -82,7 +86,7 @@ export function useSales() {
             movement_type: 'sale',
             variant_id: item.variant_id,
             event_inventory_id: einvId,
-            warehouse_id: !einvId && quickWh ? quickWh : undefined,
+            warehouse_id: !einvId && itemQuickWh ? itemQuickWh : undefined,
           })
         } else if (item.type === 'pack' && item.pack?.items) {
           for (const packItem of item.pack.items) {
@@ -95,7 +99,7 @@ export function useSales() {
               movement_type: 'pack_sale',
               variant_id: variantId,
               event_inventory_id: einvId,
-              warehouse_id: !einvId && quickWh ? quickWh : undefined,
+              warehouse_id: !einvId && itemQuickWh ? itemQuickWh : undefined,
             })
           }
         }

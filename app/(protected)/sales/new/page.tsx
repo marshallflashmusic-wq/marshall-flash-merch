@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ShoppingCart, Plus, Minus, Trash2, Package, Check,
@@ -24,7 +24,7 @@ import Card from '@/components/ui/Card'
 import PackCollage from '@/components/ui/PackCollage'
 import SwipeableTabs from '@/components/ui/SwipeableTabs'
 import { formatDate } from '@/lib/utils'
-import type { PaymentMethod, Product, Pack, ProductVariant, PackSizeSelection, Event } from '@/types'
+import type { PaymentMethod, Product, Pack, ProductVariant, PackSizeSelection, Event, CartItem } from '@/types'
 
 const SIZES_ORDER = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Única']
 
@@ -74,14 +74,15 @@ export default function NewSalePage() {
   const [sizePickerProduct, setSizePickerProduct] = useState<Product | null>(null)
   const [packSizePicker, setPackSizePicker] = useState<Pack | null>(null)
   const [warehouses, setWarehouses] = useState<{ id: string; name: string; color: string | null; totalUnits: number }[]>([])
+  const [warehouseStock, setWarehouseStock] = useState<{ warehouse_id: string; product_id: string; variant_id: string | null; quantity: number }[]>([])
   const [quickWarehouseId, setQuickWarehouseId] = useState('')
 
-  useEffect(() => {
+  const loadWarehouseData = useCallback(() => {
     fetch('/api/warehouses/overview', { cache: 'no-store' })
       .then(r => r.json())
       .then(j => {
         const whs: { id: string; name: string; color: string | null }[] = j.warehouses ?? []
-        const stockRows: { warehouse_id: string; quantity: number }[] = j.stock ?? []
+        const stockRows: { warehouse_id: string; product_id: string; variant_id: string | null; quantity: number }[] = j.stock ?? []
         const withTotals = whs.map(wh => ({
           ...wh,
           totalUnits: stockRows
@@ -89,10 +90,13 @@ export default function NewSalePage() {
             .reduce((sum, s) => sum + s.quantity, 0),
         }))
         setWarehouses(withTotals)
+        setWarehouseStock(stockRows)
         if (withTotals.length === 1) setQuickWarehouseId(withTotals[0].id)
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => { loadWarehouseData() }, [loadWarehouseData])
 
   // Total de unidades en carrito para un producto (suma todas las tallas)
   const productQty = (productId: string) =>
@@ -445,8 +449,7 @@ export default function NewSalePage() {
         onNotesChange={setSaleNotes}
         onConfirm={() => { setShowCart(false); setShowConfirm(true) }}
         warehouses={warehouses}
-        quickWarehouseId={quickWarehouseId}
-        onWarehouseChange={setQuickWarehouseId}
+        warehouseStock={warehouseStock}
         isEventMode={isEventMode}
       />
 
@@ -835,18 +838,69 @@ function PackSizePickerModal({
 
 // ─── Modal carrito ──────────────────────────────────────────────────────────
 
-function CartModal({ open, onClose, notes, onNotesChange, onConfirm, warehouses, quickWarehouseId, onWarehouseChange, isEventMode }: {
+function CartModal({ open, onClose, notes, onNotesChange, onConfirm, warehouses, warehouseStock, isEventMode }: {
   open: boolean
   onClose: () => void
   notes: string
   onNotesChange: (v: string) => void
   onConfirm: () => void
   warehouses: { id: string; name: string; color: string | null; totalUnits: number }[]
-  quickWarehouseId: string
-  onWarehouseChange: (id: string) => void
+  warehouseStock: { warehouse_id: string; product_id: string; variant_id: string | null; quantity: number }[]
   isEventMode: boolean
 }) {
   const cart = useCartStore()
+
+  // Stock disponible por almacén para un (product, variant)
+  const stockByWh = useMemo(() => {
+    const m = new Map<string, Map<string, number>>() // key product::variant → wh → qty
+    for (const s of warehouseStock) {
+      const k = `${s.product_id}::${s.variant_id ?? ''}`
+      let inner = m.get(k)
+      if (!inner) { inner = new Map(); m.set(k, inner) }
+      inner.set(s.warehouse_id, (inner.get(s.warehouse_id) ?? 0) + s.quantity)
+    }
+    return m
+  }, [warehouseStock])
+
+  // Almacenes que tienen stock para un item del carrito.
+  // Para packs: intersección de los almacenes que tienen TODOS los componentes.
+  const warehousesForItem = useCallback((item: CartItem): { id: string; name: string; color: string | null; available: number }[] => {
+    if (item.type === 'product' && item.product) {
+      const k = `${item.product.id}::${item.variant_id ?? ''}`
+      const inner = stockByWh.get(k) ?? new Map<string, number>()
+      return warehouses
+        .map(w => ({ id: w.id, name: w.name, color: w.color, available: inner.get(w.id) ?? 0 }))
+        .filter(w => w.available > 0)
+    }
+    if (item.type === 'pack' && item.pack?.items) {
+      // Para cada wh, disponibilidad del pack = min(disponible / qty necesaria por componente)
+      const perWh = new Map<string, number>()
+      for (const wh of warehouses) {
+        let minPossible = Infinity
+        for (const pi of item.pack.items) {
+          const sizeSel = item.packSizeSelections?.find((s: PackSizeSelection) => s.product_id === pi.product_id)
+          const k = `${pi.product_id}::${sizeSel?.variant_id ?? ''}`
+          const avail = stockByWh.get(k)?.get(wh.id) ?? 0
+          minPossible = Math.min(minPossible, Math.floor(avail / pi.quantity))
+        }
+        if (minPossible > 0 && minPossible !== Infinity) perWh.set(wh.id, minPossible)
+      }
+      return warehouses
+        .map(w => ({ id: w.id, name: w.name, color: w.color, available: perWh.get(w.id) ?? 0 }))
+        .filter(w => w.available > 0)
+    }
+    return []
+  }, [warehouses, stockByWh])
+
+  // Auto-asignar warehouse a items sin uno cuando se abre el modal o cambia el carrito
+  useEffect(() => {
+    if (!open || isEventMode || warehouses.length === 0) return
+    for (const item of cart.items) {
+      if (item.warehouse_id) continue
+      const opts = warehousesForItem(item)
+      if (opts.length > 0) cart.setItemWarehouse(item.id, opts[0].id)
+    }
+  }, [open, isEventMode, warehouses.length, cart, warehousesForItem])
 
   return (
     <Modal open={open} onClose={onClose} title="Resumen de venta" size="lg">
@@ -858,38 +912,78 @@ function CartModal({ open, onClose, notes, onNotesChange, onConfirm, warehouses,
           </div>
         ) : (
           <div className="space-y-2">
-            {cart.items.map(item => (
-              <div key={item.id} className="flex items-center gap-3 bg-zinc-800 rounded-xl p-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-white text-sm font-medium truncate">
-                    {item.type === 'product'
-                      ? `${item.product?.name}${item.size ? ` · ${item.size}` : ''}`
-                      : item.pack?.name}
-                  </p>
-                  {item.packSizeSelections && item.packSizeSelections.length > 0 && (
-                    <p className="text-zinc-500 text-xs mt-0.5">
-                      {item.packSizeSelections.map(s => s.size).join(' · ')}
-                    </p>
+            {cart.items.map(item => {
+              const whOpts = !isEventMode ? warehousesForItem(item) : []
+              const showWhPicker = !isEventMode && warehouses.length > 0
+              return (
+                <div key={item.id} className="bg-zinc-800 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white text-sm font-medium truncate">
+                        {item.type === 'product'
+                          ? `${item.product?.name}${item.size ? ` · ${item.size}` : ''}`
+                          : item.pack?.name}
+                      </p>
+                      {item.packSizeSelections && item.packSizeSelections.length > 0 && (
+                        <p className="text-zinc-500 text-xs mt-0.5">
+                          {item.packSizeSelections.map(s => s.size).join(' · ')}
+                        </p>
+                      )}
+                      <p className="text-zinc-500 text-xs">{formatCurrency(item.unit_price)} c/u</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => cart.updateQuantity(item.id, item.quantity - 1)} className="w-8 h-8 rounded-xl bg-zinc-700 flex items-center justify-center active:scale-90">
+                        <Minus size={13} />
+                      </button>
+                      <span className="text-white font-bold w-5 text-center">{item.quantity}</span>
+                      <button onClick={() => cart.updateQuantity(item.id, item.quantity + 1)} className="w-8 h-8 rounded-xl bg-zinc-700 flex items-center justify-center active:scale-90">
+                        <Plus size={13} />
+                      </button>
+                      <button onClick={() => cart.removeItem(item.id)} className="w-8 h-8 rounded-xl bg-red-900/50 text-red-400 flex items-center justify-center active:scale-90">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                    <span className="text-white font-bold text-sm w-14 text-right shrink-0">
+                      {formatCurrency(item.unit_price * item.quantity)}
+                    </span>
+                  </div>
+
+                  {/* Selector de almacén por artículo */}
+                  {showWhPicker && (
+                    <div className="flex items-center gap-2">
+                      <Building2 size={11} className="text-zinc-500 shrink-0" />
+                      {whOpts.length === 0 ? (
+                        <span className="text-red-400 text-[11px]">Sin stock en almacenes</span>
+                      ) : whOpts.length === 1 ? (
+                        <span className="text-zinc-400 text-[11px] truncate">
+                          {whOpts[0].name} · {whOpts[0].available} disp.
+                        </span>
+                      ) : (
+                        <select
+                          value={item.warehouse_id ?? ''}
+                          onChange={e => cart.setItemWarehouse(item.id, e.target.value || null)}
+                          className={`flex-1 bg-zinc-900 border rounded-lg py-1 px-2 text-[11px] focus:outline-none focus:border-white ${
+                            item.quantity > (whOpts.find(o => o.id === item.warehouse_id)?.available ?? 0)
+                              ? 'border-red-700 text-red-300'
+                              : 'border-zinc-700 text-zinc-200'
+                          }`}
+                        >
+                          {whOpts.map(w => (
+                            <option key={w.id} value={w.id}>
+                              {w.name} · {w.available} disp.
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {item.warehouse_id && whOpts.find(o => o.id === item.warehouse_id) &&
+                        item.quantity > (whOpts.find(o => o.id === item.warehouse_id)!.available) && (
+                        <span className="text-red-400 text-[10px] shrink-0">¡Excede!</span>
+                      )}
+                    </div>
                   )}
-                  <p className="text-zinc-500 text-xs">{formatCurrency(item.unit_price)} c/u</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => cart.updateQuantity(item.id, item.quantity - 1)} className="w-8 h-8 rounded-xl bg-zinc-700 flex items-center justify-center active:scale-90">
-                    <Minus size={13} />
-                  </button>
-                  <span className="text-white font-bold w-5 text-center">{item.quantity}</span>
-                  <button onClick={() => cart.updateQuantity(item.id, item.quantity + 1)} className="w-8 h-8 rounded-xl bg-zinc-700 flex items-center justify-center active:scale-90">
-                    <Plus size={13} />
-                  </button>
-                  <button onClick={() => cart.removeItem(item.id)} className="w-8 h-8 rounded-xl bg-red-900/50 text-red-400 flex items-center justify-center active:scale-90">
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-                <span className="text-white font-bold text-sm w-14 text-right shrink-0">
-                  {formatCurrency(item.unit_price * item.quantity)}
-                </span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
 
@@ -915,27 +1009,6 @@ function CartModal({ open, onClose, notes, onNotesChange, onConfirm, warehouses,
             ))}
           </div>
         </div>
-
-        {/* Almacén de origen (solo en venta rápida con almacenes configurados) */}
-        {!isEventMode && warehouses.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-zinc-400 flex items-center gap-1.5">
-              <Building2 size={13} />
-              Almacén de origen
-            </label>
-            <select
-              value={quickWarehouseId}
-              onChange={e => onWarehouseChange(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white focus:outline-none focus:border-white text-sm appearance-none"
-            >
-              {warehouses.map(wh => (
-                <option key={wh.id} value={wh.id}>
-                  {wh.name} · {wh.totalUnits} ud{wh.totalUnits !== 1 ? 's' : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
 
         {/* Notas */}
         <div className="flex flex-col gap-1.5">
