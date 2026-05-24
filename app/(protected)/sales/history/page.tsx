@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
-import { Clock, Filter, Banknote, Smartphone, CreditCard, Wallet, Download, X, Trash2, MessageSquare, Pencil, Package2, CalendarDays, Zap } from 'lucide-react'
+import { Clock, Filter, Banknote, Smartphone, CreditCard, Wallet, Download, X, Trash2, MessageSquare, Pencil, Package2, CalendarDays, Zap, Warehouse } from 'lucide-react'
 import { useSalesHistory } from '@/hooks/useSales'
 import { useEvents } from '@/hooks/useEvents'
 import { useAppStore } from '@/store/appStore'
@@ -48,7 +48,8 @@ export default function SalesHistoryPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState('')
   type DeleteItemPlan = { sale_item_id: string; product_id: string; product_name: string; quantity: number; include: boolean }
-  const [deleteConfirm, setDeleteConfirm] = useState<{ sale: Sale; restoreStock: boolean; warehouseId: string; itemPlans: DeleteItemPlan[] } | null>(null)
+  type RestoreMode = 'origin' | 'custom' | 'none'
+  const [deleteConfirm, setDeleteConfirm] = useState<{ sale: Sale; mode: RestoreMode; warehouseId: string; itemPlans: DeleteItemPlan[] } | null>(null)
   const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>([])
   const [savingEdit, setSavingEdit] = useState(false)
   const [editAmount, setEditAmount] = useState('')
@@ -85,6 +86,16 @@ export default function SalesHistoryPage() {
     }
   }, [refetch])
 
+  // Cargamos los almacenes en cuanto entra el admin: necesarios tanto para el
+  // detalle (mostrar nombre del almacén único) como para el modal de eliminar.
+  useEffect(() => {
+    if (isSaleMode) return
+    fetch('/api/warehouses', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => setWarehouses(j.warehouses ?? []))
+      .catch(() => {})
+  }, [isSaleMode])
+
   const handleDelete = (sale: Sale) => {
     setSelectedSale(null)
     const itemPlans: DeleteItemPlan[] = (sale.items ?? [])
@@ -96,7 +107,7 @@ export default function SalesHistoryPage() {
         quantity: i.quantity,
         include: true,
       }))
-    setDeleteConfirm({ sale, restoreStock: true, warehouseId: '', itemPlans })
+    setDeleteConfirm({ sale, mode: 'origin', warehouseId: '', itemPlans })
     if (warehouses.length === 0) {
       fetch('/api/warehouses/overview', { cache: 'no-store' })
         .then(r => r.json())
@@ -107,12 +118,16 @@ export default function SalesHistoryPage() {
 
   const confirmDelete = async () => {
     if (!deleteConfirm) return
-    const { sale, restoreStock, warehouseId, itemPlans } = deleteConfirm
+    const { sale, mode, warehouseId, itemPlans } = deleteConfirm
     setDeleteConfirm(null)
     setDeleteError('')
     setDeletingId(sale.id)
     try {
-      const restorations = warehouseId
+      // mode='origin' → no enviamos restorations: el servidor usa sale_items.warehouse_id
+      // mode='custom' → enviamos restorations dirigidas a un único almacén
+      // mode='none'   → no restauramos stock (restoreStock=false)
+      const restoreStock = mode !== 'none'
+      const restorations = mode === 'custom' && warehouseId
         ? itemPlans
             .filter(p => p.include)
             .map(p => ({ product_id: p.product_id, variant_id: null, warehouse_id: warehouseId, quantity: p.quantity }))
@@ -348,33 +363,45 @@ export default function SalesHistoryPage() {
               <div>
                 <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Artículos vendidos</p>
                 <div className="space-y-1.5">
-                  {selectedSale.items.map(item => (
-                    <div key={item.id}>
-                      <div className="flex items-center gap-2 py-1.5">
-                        <span className="text-zinc-500 text-sm w-5 shrink-0">{item.quantity}×</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            {item.pack_id && (
-                              <Package2 size={11} className="text-zinc-500 shrink-0" />
+                  {selectedSale.items.map(item => {
+                    // Almacén de origen: usa el persistido en sale_items; si no hay y
+                    // existe un único almacén global, muéstralo.
+                    const warehouseName = item.warehouse?.name
+                      ?? (warehouses.length === 1 ? warehouses[0].name : null)
+                    return (
+                      <div key={item.id}>
+                        <div className="flex items-center gap-2 py-1.5">
+                          <span className="text-zinc-500 text-sm w-5 shrink-0">{item.quantity}×</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              {item.pack_id && (
+                                <Package2 size={11} className="text-zinc-500 shrink-0" />
+                              )}
+                              <span className="text-white text-sm truncate">
+                                {item.product?.name ?? item.pack?.name ?? '?'}
+                              </span>
+                            </div>
+                            {item.pack_id && item.pack && (
+                              <p className="text-zinc-600 text-xs mt-0.5 truncate">Pack incluido</p>
                             )}
-                            <span className="text-white text-sm truncate">
-                              {item.product?.name ?? item.pack?.name ?? '?'}
-                            </span>
+                            {warehouseName && (
+                              <p className="inline-flex items-center gap-1 text-[10px] text-zinc-500 mt-0.5">
+                                <Warehouse size={9} />
+                                {warehouseName}
+                              </p>
+                            )}
                           </div>
-                          {item.pack_id && item.pack && (
-                            <p className="text-zinc-600 text-xs mt-0.5 truncate">Pack incluido</p>
-                          )}
+                          <span className="text-white text-sm font-medium shrink-0">{formatCurrency(item.subtotal)}</span>
                         </div>
-                        <span className="text-white text-sm font-medium shrink-0">{formatCurrency(item.subtotal)}</span>
+                        {item.pack_id && (
+                          <div className="ml-7 border-b border-zinc-800 pb-1.5" />
+                        )}
+                        {!item.pack_id && (
+                          <div className="border-b border-zinc-800 last:border-0" />
+                        )}
                       </div>
-                      {item.pack_id && (
-                        <div className="ml-7 border-b border-zinc-800 pb-1.5" />
-                      )}
-                      {!item.pack_id && (
-                        <div className="border-b border-zinc-800 last:border-0" />
-                      )}
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -461,93 +488,113 @@ export default function SalesHistoryPage() {
 
       {/* Modal confirmación eliminación */}
       <Modal open={!!deleteConfirm} onClose={() => setDeleteConfirm(null)} title="Eliminar venta" size="sm">
-        {deleteConfirm && (
-          <div className="space-y-4">
-            <p className="text-zinc-300 text-sm">
-              ¿Seguro que quieres eliminar esta venta de{' '}
-              <span className="text-white font-semibold">{formatCurrency(deleteConfirm.sale.total_amount)}</span>?
-              Esta acción no se puede deshacer.
-            </p>
+        {deleteConfirm && (() => {
+          const hasItems = deleteConfirm.sale.items && deleteConfirm.sale.items.length > 0
+          const singleWarehouseName = warehouses.length === 1 ? warehouses[0].name : null
+          const setMode = (m: RestoreMode) => setDeleteConfirm(prev => prev ? { ...prev, mode: m } : null)
+          return (
+            <div className="space-y-4">
+              <p className="text-zinc-300 text-sm">
+                ¿Seguro que quieres eliminar esta venta de{' '}
+                <span className="text-white font-semibold">{formatCurrency(deleteConfirm.sale.total_amount)}</span>?
+                Esta acción no se puede deshacer.
+              </p>
 
-            {deleteConfirm.sale.items && deleteConfirm.sale.items.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setDeleteConfirm(prev => prev ? { ...prev, restoreStock: !prev.restoreStock } : null)}
-                className="w-full flex items-start gap-3 bg-zinc-800 hover:bg-zinc-700/70 border border-zinc-700 rounded-xl p-3 transition-colors text-left"
-              >
-                <div className={`mt-0.5 w-4 h-4 rounded shrink-0 border-2 flex items-center justify-center transition-colors ${deleteConfirm.restoreStock ? 'bg-white border-white' : 'border-zinc-500'}`}>
-                  {deleteConfirm.restoreStock && (
-                    <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 text-black fill-current">
-                      <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
+              {hasItems && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-zinc-400">¿Qué hacer con el stock?</p>
+
+                  {/* Opción 1: por defecto, almacenes de origen */}
+                  <RestoreModeOption
+                    selected={deleteConfirm.mode === 'origin'}
+                    onSelect={() => setMode('origin')}
+                    title={singleWarehouseName
+                      ? `Devolver a ${singleWarehouseName}`
+                      : 'Devolver a sus almacenes de origen'}
+                    description={singleWarehouseName
+                      ? `Cada artículo vuelve al almacén ${singleWarehouseName}.`
+                      : 'Cada artículo vuelve al almacén desde el que se vendió.'}
+                  />
+
+                  {/* Opción 2: elegir un único almacén destino */}
+                  <RestoreModeOption
+                    selected={deleteConfirm.mode === 'custom'}
+                    onSelect={() => setMode('custom')}
+                    title="Devolver a otro almacén"
+                    description="Elige manualmente el almacén destino para todos los artículos."
+                  />
+
+                  {/* Opción 3: no restaurar */}
+                  <RestoreModeOption
+                    selected={deleteConfirm.mode === 'none'}
+                    onSelect={() => setMode('none')}
+                    title="No restaurar stock"
+                    description="Solo borrar la venta. El stock no se reincorpora."
+                  />
+                </div>
+              )}
+
+              {hasItems && deleteConfirm.mode === 'custom' && deleteConfirm.itemPlans.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-medium text-zinc-400">Almacén destino</label>
+                    <select
+                      value={deleteConfirm.warehouseId}
+                      onChange={e => setDeleteConfirm(prev => prev ? { ...prev, warehouseId: e.target.value } : null)}
+                      className="bg-zinc-800 border border-zinc-700 rounded-xl py-2 px-3 text-white text-sm focus:outline-none focus:border-white"
+                    >
+                      <option value="">Selecciona un almacén</option>
+                      {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                    </select>
+                  </div>
+
+                  {deleteConfirm.warehouseId && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-zinc-500">Elige qué artículos devolver:</p>
+                      {deleteConfirm.itemPlans.map((plan, idx) => (
+                        <button
+                          key={plan.sale_item_id}
+                          type="button"
+                          onClick={() => setDeleteConfirm(prev => prev
+                            ? { ...prev, itemPlans: prev.itemPlans.map((p, i) => i === idx ? { ...p, include: !p.include } : p) }
+                            : null
+                          )}
+                          className="w-full flex items-center gap-3 bg-zinc-800 hover:bg-zinc-700/70 border border-zinc-700 rounded-xl p-2.5 transition-colors text-left"
+                        >
+                          <div className={`w-4 h-4 rounded shrink-0 border-2 flex items-center justify-center transition-colors ${plan.include ? 'bg-white border-white' : 'border-zinc-500'}`}>
+                            {plan.include && (
+                              <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 text-black fill-current">
+                                <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </div>
+                          <span className="text-white text-sm flex-1 truncate">{plan.product_name}</span>
+                          <span className="text-zinc-400 text-xs shrink-0">{plan.quantity} ud</span>
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
-                <div>
-                  <p className="text-white text-sm font-medium">Restaurar stock global</p>
-                  <p className="text-zinc-500 text-xs mt-0.5">Devolver al inventario general los artículos de esta venta</p>
-                </div>
-              </button>
-            )}
+              )}
 
-            {deleteConfirm.itemPlans.length > 0 && (
-              <div className="space-y-3">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-medium text-zinc-400">Devolver al almacén</label>
-                  <select
-                    value={deleteConfirm.warehouseId}
-                    onChange={e => setDeleteConfirm(prev => prev ? { ...prev, warehouseId: e.target.value } : null)}
-                    className="bg-zinc-800 border border-zinc-700 rounded-xl py-2 px-3 text-white text-sm focus:outline-none focus:border-white"
-                  >
-                    <option value="">Sin restaurar a almacén</option>
-                    {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                  </select>
-                </div>
-
-                {deleteConfirm.warehouseId && (
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-zinc-500">Elige qué artículos devolver:</p>
-                    {deleteConfirm.itemPlans.map((plan, idx) => (
-                      <button
-                        key={plan.sale_item_id}
-                        type="button"
-                        onClick={() => setDeleteConfirm(prev => prev
-                          ? { ...prev, itemPlans: prev.itemPlans.map((p, i) => i === idx ? { ...p, include: !p.include } : p) }
-                          : null
-                        )}
-                        className="w-full flex items-center gap-3 bg-zinc-800 hover:bg-zinc-700/70 border border-zinc-700 rounded-xl p-2.5 transition-colors text-left"
-                      >
-                        <div className={`w-4 h-4 rounded shrink-0 border-2 flex items-center justify-center transition-colors ${plan.include ? 'bg-white border-white' : 'border-zinc-500'}`}>
-                          {plan.include && (
-                            <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 text-black fill-current">
-                              <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          )}
-                        </div>
-                        <span className="text-white text-sm flex-1 truncate">{plan.product_name}</span>
-                        <span className="text-zinc-400 text-xs shrink-0">{plan.quantity} ud</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" fullWidth onClick={() => setDeleteConfirm(null)} className="border-zinc-700">
+                  Cancelar
+                </Button>
+                <Button
+                  variant="outline"
+                  fullWidth
+                  onClick={confirmDelete}
+                  disabled={deleteConfirm.mode === 'custom' && !deleteConfirm.warehouseId}
+                  className="text-red-500 border-red-900 hover:bg-red-950/30"
+                >
+                  <Trash2 size={14} />
+                  Eliminar
+                </Button>
               </div>
-            )}
-
-            <div className="flex gap-2 pt-1">
-              <Button variant="outline" fullWidth onClick={() => setDeleteConfirm(null)} className="border-zinc-700">
-                Cancelar
-              </Button>
-              <Button
-                variant="outline"
-                fullWidth
-                onClick={confirmDelete}
-                className="text-red-500 border-red-900 hover:bg-red-950/30"
-              >
-                <Trash2 size={14} />
-                Eliminar
-              </Button>
             </div>
-          </div>
-        )}
+          )
+        })()}
       </Modal>
 
       {/* Error de eliminación */}
@@ -733,6 +780,33 @@ function SaleRow({
         </div>
       )}
     </Card>
+  )
+}
+
+function RestoreModeOption({ selected, onSelect, title, description }: {
+  selected: boolean
+  onSelect: () => void
+  title: string
+  description: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full flex items-start gap-3 rounded-xl p-3 text-left border transition-colors ${
+        selected
+          ? 'bg-white/10 border-white'
+          : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700/70'
+      }`}
+    >
+      <div className={`mt-0.5 w-4 h-4 rounded-full shrink-0 border-2 flex items-center justify-center transition-colors ${selected ? 'border-white' : 'border-zinc-500'}`}>
+        {selected && <div className="w-2 h-2 rounded-full bg-white" />}
+      </div>
+      <div>
+        <p className="text-white text-sm font-medium">{title}</p>
+        <p className="text-zinc-500 text-xs mt-0.5">{description}</p>
+      </div>
+    </button>
   )
 }
 

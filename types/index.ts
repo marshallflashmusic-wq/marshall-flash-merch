@@ -146,6 +146,8 @@ export interface SaleItem {
   unit_cost: number
   subtotal: number
   profit: number
+  warehouse_id?: string | null
+  warehouse?: { id: string; name: string } | null
 }
 
 export type MovementType = 'sale' | 'adjustment' | 'restock' | 'pack_sale' | 'return'

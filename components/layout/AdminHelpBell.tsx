@@ -37,7 +37,7 @@ const QUICK_MESSAGES = [
 
 export default function AdminHelpBell() {
   const { user, isSaleMode } = useAppStore()
-  const isAdmin = !isSaleMode && user?.role === 'admin'
+  const isAdmin = !isSaleMode && (user?.role === 'admin' || user?.role === 'boss')
 
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<'inbox' | 'send'>('inbox')

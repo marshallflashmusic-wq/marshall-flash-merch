@@ -54,7 +54,7 @@ async function playBeep() {
 
 export default function HelpRequestsListener() {
   const { user, isSaleMode } = useAppStore()
-  const isAdmin = !isSaleMode && user?.role === 'admin'
+  const isAdmin = !isSaleMode && (user?.role === 'admin' || user?.role === 'boss')
   const [toasts, setToasts] = useState<HelpRequest[]>([])
   const seenIds = useRef<Set<string>>(new Set())
 

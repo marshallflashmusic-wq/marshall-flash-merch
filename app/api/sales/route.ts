@@ -22,7 +22,8 @@ export async function GET(request: NextRequest) {
       items:sale_items(
         *,
         product:products(id, name, image_url),
-        pack:packs(id, name)
+        pack:packs(id, name),
+        warehouse:warehouses(id, name)
       )
     `, { count: 'exact' })
     .order('created_at', { ascending: false })
@@ -178,6 +179,81 @@ export async function POST(request: NextRequest) {
     }
 
     const saleId = (result as { sale_id: string; duplicate: boolean })?.sale_id
+    const duplicate = (result as { sale_id: string; duplicate: boolean })?.duplicate
+
+    // Persistir warehouse_id por item en sale_items (almacén de procedencia).
+    // Para ventas de evento: resolvemos vía event_inventory.warehouse_id.
+    // Para ventas rápidas: usamos directamente stockDecrement.warehouse_id.
+    // En packs (un sale_item con pack_id), tomamos el warehouse del primer
+    // componente que coincida (lo normal: todo el pack sale del mismo almacén).
+    if (saleId && !duplicate) {
+      try {
+        const decrements = (stockDecrements ?? []) as {
+          product_id?: string
+          pack_id?: string
+          warehouse_id?: string
+          event_inventory_id?: string
+          quantity: number
+        }[]
+
+        // Resolver warehouse por event_inventory_id en bloque
+        const einvIds = Array.from(new Set(
+          decrements.map(d => d.event_inventory_id).filter(Boolean) as string[]
+        ))
+        const einvWh = new Map<string, string | null>()
+        if (einvIds.length > 0) {
+          const { data: einvRows } = await supabase
+            .from('event_inventory')
+            .select('id, warehouse_id')
+            .in('id', einvIds)
+          for (const r of einvRows ?? []) einvWh.set(r.id, r.warehouse_id ?? null)
+        }
+
+        // Mapas product → warehouse y pack → warehouse
+        const whByProduct = new Map<string, string>()
+        const whByPack = new Map<string, string>()
+        for (const d of decrements) {
+          const wh = d.warehouse_id
+            ?? (d.event_inventory_id ? einvWh.get(d.event_inventory_id) ?? null : null)
+          if (!wh) continue
+          if (d.product_id && !whByProduct.has(d.product_id)) whByProduct.set(d.product_id, wh)
+          if (d.pack_id && !whByPack.has(d.pack_id)) whByPack.set(d.pack_id, wh)
+        }
+
+        // Si pack no trae warehouse_id directo, derivar del primer producto del pack
+        const { data: createdItems } = await supabase
+          .from('sale_items')
+          .select('id, product_id, pack_id')
+          .eq('sale_id', saleId)
+
+        for (const it of createdItems ?? []) {
+          let wh: string | undefined
+          if (it.product_id) wh = whByProduct.get(it.product_id)
+          if (!wh && it.pack_id) {
+            wh = whByPack.get(it.pack_id)
+            if (!wh) {
+              const { data: packItems } = await supabase
+                .from('pack_items')
+                .select('product_id')
+                .eq('pack_id', it.pack_id)
+              for (const pi of packItems ?? []) {
+                const cand = whByProduct.get(pi.product_id)
+                if (cand) { wh = cand; break }
+              }
+            }
+          }
+          if (wh) {
+            await supabase
+              .from('sale_items')
+              .update({ warehouse_id: wh })
+              .eq('id', it.id)
+          }
+        }
+      } catch (e) {
+        console.warn('[POST /api/sales] no se pudo persistir warehouse_id en sale_items:', e)
+      }
+    }
+
     return NextResponse.json({ sale: { id: saleId } })
   } catch (e) {
     console.error('[POST /api/sales] excepción no capturada:', e)
@@ -305,8 +381,48 @@ export async function DELETE(request: NextRequest) {
       }
     }
   } else if (restoreStock) {
-    // Auto-detección: buscar warehouse_id en event_inventory a través de inventory_movements
+    // Auto-detección "devolver a almacenes de origen":
+    // 1) Preferimos sale_items.warehouse_id (persistido al crear la venta).
+    // 2) Fallback: event_inventory.warehouse_id vía inventory_movements (compat. con ventas antiguas).
     type RestoreMov = { product_id: string; variant_id: string | null; quantity: number; warehouse_id: string }
+    const restoreToWarehouse: RestoreMov[] = []
+
+    // 1) sale_items
+    const { data: itemRows } = await supabase
+      .from('sale_items')
+      .select('product_id, pack_id, quantity, warehouse_id')
+      .eq('sale_id', id)
+    const packIds = Array.from(new Set(
+      (itemRows ?? []).map(r => r.pack_id).filter(Boolean) as string[]
+    ))
+    const packItemsByPack = new Map<string, { product_id: string; quantity: number }[]>()
+    if (packIds.length > 0) {
+      const { data: packItemRows } = await supabase
+        .from('pack_items')
+        .select('pack_id, product_id, quantity')
+        .in('pack_id', packIds)
+      for (const pi of packItemRows ?? []) {
+        const arr = packItemsByPack.get(pi.pack_id) ?? []
+        arr.push({ product_id: pi.product_id, quantity: pi.quantity })
+        packItemsByPack.set(pi.pack_id, arr)
+      }
+    }
+
+    const coveredProducts = new Set<string>()
+    for (const r of itemRows ?? []) {
+      if (!r.warehouse_id) continue
+      if (r.product_id) {
+        restoreToWarehouse.push({ product_id: r.product_id, variant_id: null, quantity: r.quantity, warehouse_id: r.warehouse_id })
+        coveredProducts.add(`${r.product_id}::${id}`)
+      } else if (r.pack_id) {
+        for (const pi of packItemsByPack.get(r.pack_id) ?? []) {
+          restoreToWarehouse.push({ product_id: pi.product_id, variant_id: null, quantity: pi.quantity * r.quantity, warehouse_id: r.warehouse_id })
+          coveredProducts.add(`${pi.product_id}::${id}`)
+        }
+      }
+    }
+
+    // 2) Fallback para ventas antiguas (sale_items.warehouse_id NULL): event_inventory vía inventory_movements
     const { data: movs } = await supabase
       .from('inventory_movements')
       .select('product_id, quantity, event_inventory_id')
@@ -321,14 +437,17 @@ export async function DELETE(request: NextRequest) {
         .in('id', eventInvIds)
       whByInv = new Map((einvRows ?? []).map(r => [r.id, { warehouse_id: r.warehouse_id ?? null, variant_id: r.variant_id ?? null }]))
     }
-    const restoreToWarehouse: RestoreMov[] = (movs ?? [])
-      .map((m: { product_id: string; quantity: number; event_inventory_id?: string }) => {
-        const inv = m.event_inventory_id ? whByInv.get(m.event_inventory_id) : undefined
-        return inv?.warehouse_id
-          ? { product_id: m.product_id, variant_id: inv.variant_id ?? null, quantity: m.quantity, warehouse_id: inv.warehouse_id }
-          : null
+    for (const m of movs ?? []) {
+      const inv = m.event_inventory_id ? whByInv.get(m.event_inventory_id) : undefined
+      if (!inv?.warehouse_id) continue
+      if (coveredProducts.has(`${m.product_id}::${id}`)) continue
+      restoreToWarehouse.push({
+        product_id: m.product_id,
+        variant_id: inv.variant_id ?? null,
+        quantity: m.quantity,
+        warehouse_id: inv.warehouse_id,
       })
-      .filter((x): x is RestoreMov => !!x)
+    }
 
     for (const mov of restoreToWarehouse) {
       let q = supabase
