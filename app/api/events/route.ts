@@ -91,17 +91,24 @@ export async function DELETE(request: NextRequest) {
   const deleteSales = searchParams.get('deleteSales') === 'true'
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-  // Actor info desde el body del DELETE
+  // Actor info + opciones de restauración desde el body del DELETE
   let actor_id: string | null = null
   let actor_name: string | null = null
   let actor_role: string = 'admin'
   let eventName: string | null = null
+  // restoreMode: 'origin' (LIFO por almacén origen) | 'custom' (todo a targetWarehouseId) | 'none'
+  let restoreMode: 'origin' | 'custom' | 'none' = restoreStock ? 'origin' : 'none'
+  let targetWarehouseId: string | null = null
   try {
     const body = await request.json()
     actor_id   = body.actor_id   ?? null
     actor_name = body.actor_name ?? null
     actor_role = body.actor_role ?? 'admin'
     eventName  = body.event_name ?? null
+    if (body.restoreMode === 'origin' || body.restoreMode === 'custom' || body.restoreMode === 'none') {
+      restoreMode = body.restoreMode
+    }
+    targetWarehouseId = body.targetWarehouseId ?? null
   } catch { /* sin body */ }
 
   // Contar ventas asociadas
@@ -159,14 +166,19 @@ export async function DELETE(request: NextRequest) {
         }
 
         const coveredProducts = new Set<string>()
+        const resolveWh = (defaultWh: string) => restoreMode === 'custom' && targetWarehouseId
+          ? targetWarehouseId
+          : defaultWh
         for (const r of itemRows ?? []) {
-          if (!r.warehouse_id) continue
+          // En modo custom, no necesitamos un warehouse origen: vamos todos al targetWarehouseId
+          const baseWh = r.warehouse_id ?? (restoreMode === 'custom' ? targetWarehouseId : null)
+          if (!baseWh) continue
           if (r.product_id) {
-            restoreToWarehouse.push({ product_id: r.product_id, variant_id: null, quantity: r.quantity, warehouse_id: r.warehouse_id })
+            restoreToWarehouse.push({ product_id: r.product_id, variant_id: null, quantity: r.quantity, warehouse_id: resolveWh(baseWh) })
             coveredProducts.add(r.product_id)
           } else if (r.pack_id) {
             for (const pi of packItemsByPack.get(r.pack_id) ?? []) {
-              restoreToWarehouse.push({ product_id: pi.product_id, variant_id: null, quantity: pi.quantity * r.quantity, warehouse_id: r.warehouse_id })
+              restoreToWarehouse.push({ product_id: pi.product_id, variant_id: null, quantity: pi.quantity * r.quantity, warehouse_id: resolveWh(baseWh) })
               coveredProducts.add(pi.product_id)
             }
           }
@@ -189,13 +201,14 @@ export async function DELETE(request: NextRequest) {
         }
         for (const m of movs ?? []) {
           const inv = m.event_inventory_id ? whByInv.get(m.event_inventory_id) : undefined
-          if (!inv?.warehouse_id) continue
+          const baseWh = inv?.warehouse_id ?? (restoreMode === 'custom' ? targetWarehouseId : null)
+          if (!baseWh) continue
           if (coveredProducts.has(m.product_id)) continue
           restoreToWarehouse.push({
             product_id: m.product_id,
-            variant_id: inv.variant_id ?? null,
+            variant_id: inv?.variant_id ?? null,
             quantity: m.quantity,
-            warehouse_id: inv.warehouse_id,
+            warehouse_id: resolveWh(baseWh),
           })
         }
 
@@ -246,19 +259,24 @@ export async function DELETE(request: NextRequest) {
       const leftover = (row.quantity_assigned ?? 0) - (row.quantity_sold ?? 0)
       if (leftover <= 0) continue
 
-      const allocs: Alloc[] = Array.isArray(row.warehouse_allocations) ? [...row.warehouse_allocations] : []
       const plan: { wh_id: string; qty: number }[] = []
-      let toReturn = leftover
-      while (toReturn > 0 && allocs.length > 0) {
-        const top = allocs[allocs.length - 1]
-        const take = Math.min(top.qty, toReturn)
-        plan.push({ wh_id: top.wh_id, qty: take })
-        toReturn -= take
-        if (take === top.qty) allocs.pop()
-        else allocs[allocs.length - 1] = { wh_id: top.wh_id, qty: top.qty - take }
-      }
-      if (toReturn > 0 && row.warehouse_id) {
-        plan.push({ wh_id: row.warehouse_id, qty: toReturn })
+      if (restoreMode === 'custom' && targetWarehouseId) {
+        // Todo el sobrante va a un único almacén destino
+        plan.push({ wh_id: targetWarehouseId, qty: leftover })
+      } else {
+        const allocs: Alloc[] = Array.isArray(row.warehouse_allocations) ? [...row.warehouse_allocations] : []
+        let toReturn = leftover
+        while (toReturn > 0 && allocs.length > 0) {
+          const top = allocs[allocs.length - 1]
+          const take = Math.min(top.qty, toReturn)
+          plan.push({ wh_id: top.wh_id, qty: take })
+          toReturn -= take
+          if (take === top.qty) allocs.pop()
+          else allocs[allocs.length - 1] = { wh_id: top.wh_id, qty: top.qty - take }
+        }
+        if (toReturn > 0 && row.warehouse_id) {
+          plan.push({ wh_id: row.warehouse_id, qty: toReturn })
+        }
       }
 
       for (const p of plan) {

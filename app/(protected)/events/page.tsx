@@ -32,8 +32,21 @@ export default function EventsPage() {
   const [actionEvent, setActionEvent] = useState<{ event: Event; action: 'close' | 'cancel' | 'delete' } | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [actionError, setActionError] = useState('')
-  const [deleteRestoreStock, setDeleteRestoreStock] = useState(true)
+  type DeleteRestoreMode = 'origin' | 'custom' | 'none'
+  const [deleteMode, setDeleteMode] = useState<DeleteRestoreMode>('origin')
+  const [deleteTargetWarehouse, setDeleteTargetWarehouse] = useState('')
   const [deleteSales, setDeleteSales] = useState(true)
+  type EventStockPreview = {
+    product_id: string
+    product_name: string
+    variant_size?: string | null
+    leftover: number
+    sold: number
+    origin_warehouse_id: string | null
+    origin_warehouse_name: string | null
+  }
+  const [deletePreview, setDeletePreview] = useState<EventStockPreview[]>([])
+  const [deleteWarehouses, setDeleteWarehouses] = useState<{ id: string; name: string }[]>([])
 
   // Resumen de concierto cerrado
   const [summaryEvent, setSummaryEvent] = useState<Event | null>(null)
@@ -136,13 +149,22 @@ export default function EventsPage() {
         endpoint = `/api/events/${event.id}/cancel`
       } else {
         method = 'DELETE'
+        const restoreStock = deleteMode !== 'none'
         const qs = new URLSearchParams({
           id: event.id,
-          restoreStock: String(deleteRestoreStock),
+          restoreStock: String(restoreStock),
           deleteSales: String(deleteSales),
         })
         endpoint = `/api/events?${qs.toString()}`
-        fetchOpts = { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(actor) }
+        fetchOpts = {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...actor,
+            restoreMode: deleteMode,
+            targetWarehouseId: deleteMode === 'custom' ? deleteTargetWarehouse : null,
+          }),
+        }
       }
       const res = await fetch(endpoint, fetchOpts)
       const json = await res.json().catch(() => ({}))
@@ -172,9 +194,42 @@ export default function EventsPage() {
 
   const openAction = (event: Event, action: 'close' | 'cancel' | 'delete') => {
     setActionError('')
-    setDeleteRestoreStock(true)
+    setDeleteMode('origin')
+    setDeleteTargetWarehouse('')
     setDeleteSales(true)
+    setDeletePreview([])
     setActionEvent({ event, action })
+
+    if (action === 'delete') {
+      // Cargar almacenes y previsualización del stock asignado al concierto
+      // (lo que se devolverá al borrar) para mostrar origen en el modal.
+      Promise.all([
+        fetch('/api/warehouses', { cache: 'no-store' }).then(r => r.ok ? r.json() : { warehouses: [] }),
+        fetch(`/api/events/${event.id}/inventory`, { cache: 'no-store' }).then(r => r.ok ? r.json() : { inventory: [] }),
+      ]).then(([wRes, invRes]) => {
+        const whs = (wRes.warehouses ?? []) as { id: string; name: string }[]
+        setDeleteWarehouses(whs)
+        const whById = new Map(whs.map(w => [w.id, w.name] as const))
+        type InvRow = {
+          product_id: string
+          product_name?: string
+          variant_size?: string | null
+          quantity_assigned: number
+          quantity_sold: number
+          warehouse_id: string | null
+        }
+        const preview: EventStockPreview[] = (invRes.inventory ?? []).map((r: InvRow) => ({
+          product_id: r.product_id,
+          product_name: r.product_name ?? 'Artículo',
+          variant_size: r.variant_size ?? null,
+          leftover: Math.max(0, (r.quantity_assigned ?? 0) - (r.quantity_sold ?? 0)),
+          sold: r.quantity_sold ?? 0,
+          origin_warehouse_id: r.warehouse_id ?? null,
+          origin_warehouse_name: r.warehouse_id ? (whById.get(r.warehouse_id) ?? null) : null,
+        })).filter((p: EventStockPreview) => p.leftover > 0 || p.sold > 0)
+        setDeletePreview(preview)
+      }).catch(() => {})
+    }
   }
 
   const filtered = useMemo(() => {
@@ -272,12 +327,68 @@ export default function EventsPage() {
               <p className="text-zinc-400 text-sm">
                 Vas a eliminar <span className="text-white font-semibold">{actionEvent.event.name}</span>. Esta acción no se puede deshacer.
               </p>
-              <CheckOption
-                checked={deleteRestoreStock}
-                onToggle={() => setDeleteRestoreStock(v => !v)}
-                title="Restablecer stock"
-                description="Devuelve al inventario global el stock asignado y el de las ventas borradas."
-              />
+
+              {/* Previsualización: qué stock se va a devolver y de dónde vino */}
+              {deletePreview.length > 0 && (
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 space-y-1.5 max-h-40 overflow-y-auto">
+                  <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Stock a devolver</p>
+                  {deletePreview.map(p => {
+                    const total = p.leftover + p.sold
+                    return (
+                      <div key={`${p.product_id}-${p.variant_size ?? ''}`} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-white truncate flex-1">
+                          {p.product_name}{p.variant_size ? ` · ${p.variant_size}` : ''}
+                        </span>
+                        <span className="text-zinc-400 shrink-0">{total} ud</span>
+                        <span className="text-amber-400 text-[10px] shrink-0 truncate max-w-[110px]">
+                          {p.origin_warehouse_name ?? 'sin origen'}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-zinc-400">¿Qué hacer con el stock?</p>
+                <DeleteRestoreOption
+                  selected={deleteMode === 'origin'}
+                  onSelect={() => setDeleteMode('origin')}
+                  title="Devolver a sus almacenes de origen"
+                  description={
+                    deletePreview.some(p => p.origin_warehouse_name)
+                      ? 'Cada artículo vuelve al almacén desde el que se asignó.'
+                      : 'Cada artículo vuelve al almacén desde el que se asignó o vendió.'
+                  }
+                />
+                <DeleteRestoreOption
+                  selected={deleteMode === 'custom'}
+                  onSelect={() => setDeleteMode('custom')}
+                  title="Devolver a otro almacén"
+                  description="Elige manualmente un único almacén destino para todo el stock."
+                />
+                <DeleteRestoreOption
+                  selected={deleteMode === 'none'}
+                  onSelect={() => setDeleteMode('none')}
+                  title="No restaurar stock"
+                  description="Solo borrar el concierto. El stock no se reincorpora a ningún almacén."
+                />
+              </div>
+
+              {deleteMode === 'custom' && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-zinc-400">Almacén destino</label>
+                  <select
+                    value={deleteTargetWarehouse}
+                    onChange={e => setDeleteTargetWarehouse(e.target.value)}
+                    className="bg-zinc-800 border border-zinc-700 rounded-xl py-2 px-3 text-white text-sm focus:outline-none focus:border-white"
+                  >
+                    <option value="">Selecciona un almacén</option>
+                    {deleteWarehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  </select>
+                </div>
+              )}
+
               <CheckOption
                 checked={deleteSales}
                 onToggle={() => setDeleteSales(v => !v)}
@@ -289,7 +400,14 @@ export default function EventsPage() {
           {actionError && <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2"><p className="text-red-400 text-sm">{actionError}</p></div>}
           <div className="flex gap-3">
             <Button variant="outline" fullWidth onClick={() => setActionEvent(null)} disabled={actionLoading}>Cancelar</Button>
-            <Button fullWidth onClick={runAction} loading={actionLoading}>{actionEvent?.action === 'delete' ? 'Eliminar' : 'Confirmar'}</Button>
+            <Button
+              fullWidth
+              onClick={runAction}
+              loading={actionLoading}
+              disabled={actionEvent?.action === 'delete' && deleteMode === 'custom' && !deleteTargetWarehouse}
+            >
+              {actionEvent?.action === 'delete' ? 'Eliminar' : 'Confirmar'}
+            </Button>
           </div>
         </div>
       </Modal>
@@ -514,6 +632,33 @@ function EventCard({
         )}
       </div>
     </Card>
+  )
+}
+
+function DeleteRestoreOption({ selected, onSelect, title, description }: {
+  selected: boolean
+  onSelect: () => void
+  title: string
+  description: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full flex items-start gap-3 rounded-xl p-3 text-left border transition-colors ${
+        selected
+          ? 'bg-white/10 border-white'
+          : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700/70'
+      }`}
+    >
+      <div className={`mt-0.5 w-4 h-4 rounded-full shrink-0 border-2 flex items-center justify-center transition-colors ${selected ? 'border-white' : 'border-zinc-500'}`}>
+        {selected && <div className="w-2 h-2 rounded-full bg-white" />}
+      </div>
+      <div>
+        <p className="text-white text-sm font-medium">{title}</p>
+        <p className="text-zinc-500 text-xs mt-0.5">{description}</p>
+      </div>
+    </button>
   )
 }
 
