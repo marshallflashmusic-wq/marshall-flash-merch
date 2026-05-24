@@ -212,8 +212,12 @@ export async function POST(
     newWarehouseId = newAllocs.length > 0 ? newAllocs[newAllocs.length - 1].wh_id : existingRow?.warehouse_id ?? null
   }
 
-  // Persistir warehouse_allocations y warehouse_id actualizados
-  if (existingRow) {
+  // Persistir warehouse_allocations y warehouse_id actualizados.
+  // Importante: se ejecuta SIEMPRE (también en la primera asignación, cuando
+  // la fila se creó dentro del RPC), no solo si existingRow ya existía.
+  // Si no, warehouse_id y warehouse_allocations se quedan en NULL para
+  // siempre y luego el sistema dice "almacén sin determinar".
+  {
     let updateQ = supabase
       .from('event_inventory')
       .update({
@@ -225,7 +229,10 @@ export async function POST(
       .eq('product_id', product_id)
     if (variant_id) updateQ = updateQ.eq('variant_id', variant_id)
     else updateQ = updateQ.is('variant_id', null)
-    await updateQ
+    const { error: updErr } = await updateQ
+    if (updErr) {
+      console.error('[POST events/inventory] no se pudo persistir warehouse_id/allocations:', updErr.message)
+    }
   }
 
   return NextResponse.json({ result: data })
