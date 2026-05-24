@@ -77,6 +77,7 @@ export default function WarehousesPage() {
   const [locateErr, setLocateErr] = useState('')
 
   const [assignWh, setAssignWh] = useState<Warehouse | null>(null)
+  const [viewWh, setViewWh] = useState<Warehouse | null>(null)
   const [fillingId, setFillingId] = useState<string | null>(null)
   const [fillResult, setFillResult] = useState<{ id: string; units: number } | null>(null)
   const [unassignedOpen, setUnassignedOpen] = useState(false)
@@ -441,7 +442,13 @@ export default function WarehousesPage() {
             const lines = whStock.length
             return (
               <Card key={wh.id} padding="none">
-                <div className="p-3 flex items-center gap-3">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setViewWh(wh)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setViewWh(wh) }}
+                  className="p-3 flex items-center gap-3 cursor-pointer active:bg-white/5 transition-colors"
+                >
                   <div
                     className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
                     style={{ backgroundColor: (wh.color ?? DEFAULT_WH_COLOR) + '33', borderColor: wh.color ?? DEFAULT_WH_COLOR, borderWidth: 1 }}
@@ -462,7 +469,7 @@ export default function WarehousesPage() {
                       <span className="text-zinc-500 text-xs">{lines} línea{lines !== 1 ? 's' : ''}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
                     <button
                       onClick={() => { setEditWh(wh); setEditName(wh.name); setEditColor(wh.color ?? DEFAULT_WH_COLOR) }}
                       className="p-2 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white"
@@ -588,6 +595,88 @@ export default function WarehousesPage() {
             <Button fullWidth onClick={handleEditSave}>Guardar</Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Modal detalle stock por almacén */}
+      <Modal open={!!viewWh} onClose={() => setViewWh(null)} title={viewWh?.name ?? ''} size="md">
+        {viewWh && (() => {
+          const rows = stock.filter(s => s.warehouse_id === viewWh.id)
+          type DetailRow = { product_id: string; product_name: string; image_url: string | null; variant_id: string | null; size: string | null; quantity: number }
+          const detail: DetailRow[] = rows.map(s => {
+            const p = products.find(pp => pp.id === s.product_id)
+            const v = s.variant_id ? variants.find(vv => vv.id === s.variant_id) : null
+            return {
+              product_id: s.product_id,
+              product_name: p?.name ?? 'Artículo',
+              image_url: p?.image_url ?? null,
+              variant_id: s.variant_id,
+              size: v?.size ?? null,
+              quantity: s.quantity,
+            }
+          }).sort((a, b) => {
+            if (a.product_name !== b.product_name) return a.product_name.localeCompare(b.product_name)
+            return SIZE_ORDER.indexOf(a.size ?? '') - SIZE_ORDER.indexOf(b.size ?? '')
+          })
+          const totalUnits = detail.reduce((a, r) => a + r.quantity, 0)
+          return (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
+                  <p className="text-zinc-500 text-xs">Unidades</p>
+                  <p className="text-white font-black text-lg">{totalUnits}</p>
+                </div>
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-center">
+                  <p className="text-zinc-500 text-xs">Líneas</p>
+                  <p className="text-white font-black text-lg">{detail.length}</p>
+                </div>
+              </div>
+
+              {detail.length === 0 ? (
+                <div className="flex flex-col items-center py-8 text-zinc-600">
+                  <Package size={32} />
+                  <p className="mt-2 text-sm">Sin stock en este almacén</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-[55vh] overflow-y-auto pr-1">
+                  {detail.map((r, idx) => (
+                    <div
+                      key={`${r.product_id}-${r.variant_id ?? 'none'}-${idx}`}
+                      className="flex items-center gap-3 bg-zinc-800/50 border border-zinc-800 rounded-xl p-2.5"
+                    >
+                      <div className="w-10 h-10 rounded-lg bg-zinc-800 overflow-hidden shrink-0">
+                        {r.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={r.image_url} alt={r.product_name} className="w-full h-full object-cover" />
+                        ) : <div className="w-full h-full flex items-center justify-center"><Package size={16} className="text-zinc-600" /></div>}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-semibold truncate">{r.product_name}</p>
+                        {r.size && <p className="text-zinc-500 text-xs mt-0.5">Talla {r.size}</p>}
+                      </div>
+                      <span
+                        className="text-black text-xs font-black px-2 py-1 rounded-lg shrink-0"
+                        style={{ backgroundColor: viewWh.color ?? DEFAULT_WH_COLOR }}
+                      >
+                        {r.quantity} ud
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <Button variant="outline" fullWidth onClick={() => setViewWh(null)}>Cerrar</Button>
+                <Button
+                  fullWidth
+                  onClick={() => { setAssignWh(viewWh); setViewWh(null) }}
+                  className="bg-amber-500 hover:bg-amber-400 text-black"
+                >
+                  <Package size={14} />Editar stock
+                </Button>
+              </div>
+            </div>
+          )
+        })()}
       </Modal>
 
       {/* Modal detalle "Sin ubicar" */}
