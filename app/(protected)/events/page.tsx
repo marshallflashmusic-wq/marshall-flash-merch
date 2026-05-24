@@ -26,7 +26,8 @@ export default function EventsPage() {
   const [filter, setFilter] = useState<FilterKey>('active')
   const [showModal, setShowModal] = useState(false)
   const [editEvent, setEditEvent] = useState<Event | null>(null)
-  const [saving, setSaving] = useState(false)
+  const [savingMode, setSavingMode] = useState<'create' | 'activate-and-open' | null>(null)
+  const saving = savingMode !== null
   const [saveError, setSaveError] = useState('')
   const [form, setForm] = useState({ name: '', city: '', venue: '', date: '', notes: '' })
   const [actionEvent, setActionEvent] = useState<{ event: Event; action: 'close' | 'cancel' | 'delete' } | null>(null)
@@ -78,7 +79,7 @@ export default function EventsPage() {
     if (!form.name.trim() || !form.city.trim() || !form.venue.trim() || !form.date) {
       setSaveError('Rellena los campos obligatorios.'); return
     }
-    setSaving(true)
+    setSavingMode(mode)
     try {
       const url = '/api/events'
       const method = editEvent ? 'PATCH' : 'POST'
@@ -110,7 +111,7 @@ export default function EventsPage() {
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
-      setSaving(false)
+      setSavingMode(null)
     }
   }
 
@@ -287,19 +288,27 @@ export default function EventsPage() {
           {saveError && <div className="bg-red-950/50 border border-red-900 rounded-xl px-3 py-2"><p className="text-red-400 text-sm">{saveError}</p></div>}
           {editEvent ? (
             <div className="flex gap-2 pt-2">
-              <Button type="button" variant="outline" fullWidth onClick={() => setShowModal(false)}>Cancelar</Button>
+              <Button type="button" variant="outline" fullWidth onClick={() => setShowModal(false)} disabled={saving}>Cancelar</Button>
               <Button type="submit" fullWidth loading={saving}>Guardar</Button>
             </div>
           ) : (
             <div className="flex flex-col gap-2 pt-2">
               <div className="flex gap-2">
                 <Button type="button" variant="outline" fullWidth onClick={() => setShowModal(false)} disabled={saving}>Cancelar</Button>
-                <Button type="submit" fullWidth loading={saving}>Crear concierto</Button>
+                <Button
+                  type="submit"
+                  fullWidth
+                  loading={savingMode === 'create'}
+                  disabled={saving && savingMode !== 'create'}
+                >
+                  Crear concierto
+                </Button>
               </div>
               <Button
                 type="button"
                 fullWidth
-                loading={saving}
+                loading={savingMode === 'activate-and-open'}
+                disabled={saving && savingMode !== 'activate-and-open'}
                 onClick={e => handleSave(e as unknown as React.FormEvent, 'activate-and-open')}
                 className="bg-amber-500 hover:bg-amber-400 text-black"
               >

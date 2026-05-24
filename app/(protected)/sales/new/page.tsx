@@ -40,6 +40,8 @@ export default function NewSalePage() {
   const router = useRouter()
   const globalProducts = useProducts()
   const globalPacks = usePacks()
+  const { events: allEvents } = useEvents()
+  const activeEvents = useMemo(() => allEvents.filter(e => e.status === 'active'), [allEvents])
   const { createSale, loading: creating } = useSales()
   const cart = useCartStore()
   const {
@@ -209,9 +211,20 @@ export default function NewSalePage() {
     return (
       <TpvModeSelector
         onPickQuick={() => setTpvFlow('quick')}
-        onPickEvent={() => setTpvFlow('event')}
+        onPickEvent={() => {
+          // Si hay UN solo concierto activo, ir directo a él.
+          // Si hay varios, mostrar el EventPicker.
+          // Si hay 0, este botón no debería estar visible (lo oculta el selector).
+          if (activeEvents.length === 1) {
+            setActiveEvent(activeEvents[0])
+            setTpvFlow('event')
+          } else {
+            setTpvFlow('event')
+          }
+        }}
         onBack={isSaleMode ? undefined : handleBackToDashboard}
         onExit={isSaleMode ? handleExitSaleMode : undefined}
+        hasActiveEvent={activeEvents.length > 0}
       />
     )
   }
@@ -1034,11 +1047,12 @@ function EmptyState({ icon, text, hint }: { icon: React.ReactNode; text: string;
 }
 
 // ─── Selector de modo: Evento vs Venta rápida ───────────────────────────────
-function TpvModeSelector({ onPickQuick, onPickEvent, onBack, onExit }: {
+function TpvModeSelector({ onPickQuick, onPickEvent, onBack, onExit, hasActiveEvent }: {
   onPickQuick: () => void
   onPickEvent: () => void
   onBack?: () => void
   onExit?: () => void
+  hasActiveEvent: boolean
 }) {
   return (
     <div className="h-full flex flex-col bg-[#0a0a0a]">
@@ -1054,16 +1068,18 @@ function TpvModeSelector({ onPickQuick, onPickEvent, onBack, onExit }: {
         ) : <div className="w-9" />}
       </div>
       <div className="flex-1 flex flex-col gap-4 p-5 justify-center max-w-md mx-auto w-full">
-        <button
-          onClick={onPickEvent}
-          className="bg-amber-500 hover:bg-amber-400 rounded-3xl p-7 flex flex-col items-center gap-3 active:scale-[0.98] transition-transform shadow-2xl shadow-amber-500/20"
-        >
-          <CalendarDays size={44} className="text-black" strokeWidth={2.5} />
-          <div className="text-center">
-            <p className="text-black text-2xl font-black leading-none">CONCIERTO</p>
-            <p className="text-black/70 text-sm font-medium mt-1">Vender el stock asignado a un concierto</p>
-          </div>
-        </button>
+        {hasActiveEvent && (
+          <button
+            onClick={onPickEvent}
+            className="bg-amber-500 hover:bg-amber-400 rounded-3xl p-7 flex flex-col items-center gap-3 active:scale-[0.98] transition-transform shadow-2xl shadow-amber-500/20"
+          >
+            <CalendarDays size={44} className="text-black" strokeWidth={2.5} />
+            <div className="text-center">
+              <p className="text-black text-2xl font-black leading-none">CONCIERTO</p>
+              <p className="text-black/70 text-sm font-medium mt-1">Vender el stock asignado a un concierto</p>
+            </div>
+          </button>
+        )}
         <button
           onClick={onPickQuick}
           className="bg-white hover:bg-zinc-100 rounded-3xl p-7 flex flex-col items-center gap-3 active:scale-[0.98] transition-transform shadow-2xl shadow-white/10"
@@ -1075,8 +1091,11 @@ function TpvModeSelector({ onPickQuick, onPickEvent, onBack, onExit }: {
           </div>
         </button>
         <p className="text-zinc-600 text-xs text-center mt-2">
-          Modo concierto: descuenta del stock reservado para el concierto y del global.<br />
-          Venta rápida: descuenta del inventario general.
+          {hasActiveEvent ? (
+            <>Modo concierto: descuenta del stock reservado para el concierto y del global.<br />Venta rápida: descuenta del inventario general.</>
+          ) : (
+            <>No hay conciertos activos. Activa uno desde Conciertos para vender en modo concierto.</>
+          )}
         </p>
       </div>
     </div>
