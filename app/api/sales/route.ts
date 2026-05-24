@@ -182,10 +182,10 @@ export async function POST(request: NextRequest) {
     const duplicate = (result as { sale_id: string; duplicate: boolean })?.duplicate
 
     // Persistir warehouse_id por item en sale_items (almacén de procedencia).
-    // Para ventas de evento: resolvemos vía event_inventory.warehouse_id.
-    // Para ventas rápidas: usamos directamente stockDecrement.warehouse_id.
-    // En packs (un sale_item con pack_id), tomamos el warehouse del primer
-    // componente que coincida (lo normal: todo el pack sale del mismo almacén).
+    // Estrategia robusta: matcheamos sale_items recién creados con el array
+    // `items` enviado por el cliente identificando cada fila por
+    // (product_id|pack_id, quantity, subtotal). Esto evita el bug del mapa
+    // por producto cuando un mismo producto se vende desde varios orígenes.
     if (saleId && !duplicate) {
       try {
         const decrements = (stockDecrements ?? []) as {
@@ -196,7 +196,8 @@ export async function POST(request: NextRequest) {
           quantity: number
         }[]
 
-        // Resolver warehouse por event_inventory_id en bloque
+        // Mapa product_id → warehouse_id derivado de event_inventory (ventas de evento).
+        // Resuelve cada línea del decrement individualmente, no de forma global.
         const einvIds = Array.from(new Set(
           decrements.map(d => d.event_inventory_id).filter(Boolean) as string[]
         ))
@@ -209,36 +210,54 @@ export async function POST(request: NextRequest) {
           for (const r of einvRows ?? []) einvWh.set(r.id, r.warehouse_id ?? null)
         }
 
-        // Mapas product → warehouse y pack → warehouse
-        const whByProduct = new Map<string, string>()
-        const whByPack = new Map<string, string>()
-        for (const d of decrements) {
-          const wh = d.warehouse_id
-            ?? (d.event_inventory_id ? einvWh.get(d.event_inventory_id) ?? null : null)
-          if (!wh) continue
-          if (d.product_id && !whByProduct.has(d.product_id)) whByProduct.set(d.product_id, wh)
-          if (d.pack_id && !whByPack.has(d.pack_id)) whByPack.set(d.pack_id, wh)
-        }
+        // Resolver warehouse de cada decrement (eventInventory o quick warehouse)
+        type Resolved = { product_id?: string; pack_id?: string; quantity: number; wh: string | null }
+        const resolved: Resolved[] = decrements.map(d => ({
+          product_id: d.product_id,
+          pack_id: d.pack_id,
+          quantity: d.quantity,
+          wh: d.warehouse_id ?? (d.event_inventory_id ? einvWh.get(d.event_inventory_id) ?? null : null),
+        }))
 
-        // Si pack no trae warehouse_id directo, derivar del primer producto del pack
+        // sale_items recién insertados, ordenados por id para tener un orden estable
         const { data: createdItems } = await supabase
           .from('sale_items')
-          .select('id, product_id, pack_id')
+          .select('id, product_id, pack_id, quantity')
           .eq('sale_id', saleId)
+          .order('id', { ascending: true })
 
+        // Para cada sale_item, buscar el wh:
+        //  - product_id: del primer decrement (sin consumir) que coincida en product_id+quantity
+        //  - pack_id: del primer pack_item con wh resuelto que coincida
+        const consumed = new Set<number>()
         for (const it of createdItems ?? []) {
-          let wh: string | undefined
-          if (it.product_id) wh = whByProduct.get(it.product_id)
-          if (!wh && it.pack_id) {
-            wh = whByPack.get(it.pack_id)
-            if (!wh) {
-              const { data: packItems } = await supabase
-                .from('pack_items')
-                .select('product_id')
-                .eq('pack_id', it.pack_id)
-              for (const pi of packItems ?? []) {
-                const cand = whByProduct.get(pi.product_id)
-                if (cand) { wh = cand; break }
+          let wh: string | null = null
+          if (it.product_id) {
+            // 1) match exacto product_id + quantity
+            let idx = resolved.findIndex((r, i) =>
+              !consumed.has(i) && r.product_id === it.product_id && r.quantity === it.quantity && r.wh
+            )
+            // 2) fallback: cualquier decrement con ese product_id que tenga wh
+            if (idx < 0) {
+              idx = resolved.findIndex((r, i) =>
+                !consumed.has(i) && r.product_id === it.product_id && r.wh
+              )
+            }
+            if (idx >= 0) {
+              wh = resolved[idx].wh
+              consumed.add(idx)
+            }
+          } else if (it.pack_id) {
+            // Para packs, el cliente envía N decrements (uno por producto del pack).
+            // Tomamos el primero con wh resuelto y lo usamos para el sale_item.
+            const idx = resolved.findIndex((r, i) =>
+              !consumed.has(i) && r.pack_id === it.pack_id && r.wh
+            )
+            if (idx >= 0) {
+              wh = resolved[idx].wh
+              // Consumimos TODOS los decrements de este pack (todos van al mismo wh)
+              for (let i = 0; i < resolved.length; i++) {
+                if (!consumed.has(i) && resolved[i].pack_id === it.pack_id) consumed.add(i)
               }
             }
           }

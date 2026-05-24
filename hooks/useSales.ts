@@ -32,6 +32,29 @@ export function useSales() {
       const cost   = items.reduce((acc, i) => acc + i.unit_cost  * i.quantity, 0)
       const profit = total - cost
 
+      const resolver = options?.eventInventoryResolver
+      const quickWh = options?.quickSaleWarehouseId
+
+      // Resolver warehouse de origen por sale_item. Para ventas de evento el
+      // server lo deriva desde event_inventory.warehouse_id (no podemos saberlo
+      // aquí sin más consultas). Para ventas rápidas usamos quickWh.
+      const resolveWarehouseForItem = (item: CartItem): string | null => {
+        if (item.type === 'product' && item.product) {
+          const einvId = resolver?.(item.product.id, item.variant_id ?? null)
+          if (einvId) return null
+          return quickWh ?? null
+        }
+        if (item.type === 'pack' && item.pack?.items) {
+          const anyEinv = item.pack.items.some(pi => {
+            const sizeSel = item.packSizeSelections?.find(s => s.product_id === pi.product_id)
+            return !!resolver?.(pi.product_id, sizeSel?.variant_id ?? null)
+          })
+          if (anyEinv) return null
+          return quickWh ?? null
+        }
+        return null
+      }
+
       const saleItems = items.map(item => ({
         product_id: item.type === 'product' ? (item.product?.id ?? undefined) : undefined,
         pack_id:    item.type === 'pack'    ? (item.pack?.id    ?? undefined) : undefined,
@@ -40,10 +63,8 @@ export function useSales() {
         unit_cost:  item.unit_cost,
         subtotal:   item.unit_price * item.quantity,
         profit:     (item.unit_price - item.unit_cost) * item.quantity,
+        warehouse_id: resolveWarehouseForItem(item),
       }))
-
-      const resolver = options?.eventInventoryResolver
-      const quickWh = options?.quickSaleWarehouseId
       const stockDecrements: {
         product_id: string
         quantity: number
