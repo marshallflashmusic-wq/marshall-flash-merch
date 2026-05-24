@@ -211,6 +211,7 @@ export default function EventsPage() {
         const whs = (wRes.warehouses ?? []) as { id: string; name: string }[]
         setDeleteWarehouses(whs)
         const whById = new Map(whs.map(w => [w.id, w.name] as const))
+        type Alloc = { wh_id: string; qty: number }
         type InvRow = {
           product_id: string
           product_name?: string
@@ -218,16 +219,55 @@ export default function EventsPage() {
           quantity_assigned: number
           quantity_sold: number
           warehouse_id: string | null
+          warehouse_allocations?: Alloc[] | null
         }
-        const preview: EventStockPreview[] = (invRes.inventory ?? []).map((r: InvRow) => ({
-          product_id: r.product_id,
-          product_name: r.product_name ?? 'Artículo',
-          variant_size: r.variant_size ?? null,
-          leftover: Math.max(0, (r.quantity_assigned ?? 0) - (r.quantity_sold ?? 0)),
-          sold: r.quantity_sold ?? 0,
-          origin_warehouse_id: r.warehouse_id ?? null,
-          origin_warehouse_name: r.warehouse_id ? (whById.get(r.warehouse_id) ?? null) : null,
-        })).filter((p: EventStockPreview) => p.leftover > 0 || p.sold > 0)
+        // Expandir cada fila por almacén origen: si warehouse_allocations
+        // tiene varias entradas, generamos una línea por almacén.
+        const preview: EventStockPreview[] = []
+        for (const r of (invRes.inventory ?? []) as InvRow[]) {
+          const assigned = r.quantity_assigned ?? 0
+          const sold = r.quantity_sold ?? 0
+          if (assigned <= 0 && sold <= 0) continue
+
+          const allocs: Alloc[] = Array.isArray(r.warehouse_allocations) ? r.warehouse_allocations : []
+          if (allocs.length > 0) {
+            for (const a of allocs) {
+              if (!a.qty || a.qty <= 0) continue
+              const proportionalSold = assigned > 0 ? Math.round((sold * a.qty) / assigned) : 0
+              const leftover = Math.max(0, a.qty - proportionalSold)
+              preview.push({
+                product_id: r.product_id,
+                product_name: r.product_name ?? 'Artículo',
+                variant_size: r.variant_size ?? null,
+                leftover,
+                sold: proportionalSold,
+                origin_warehouse_id: a.wh_id,
+                origin_warehouse_name: whById.get(a.wh_id) ?? null,
+              })
+            }
+          } else if (r.warehouse_id) {
+            preview.push({
+              product_id: r.product_id,
+              product_name: r.product_name ?? 'Artículo',
+              variant_size: r.variant_size ?? null,
+              leftover: Math.max(0, assigned - sold),
+              sold,
+              origin_warehouse_id: r.warehouse_id,
+              origin_warehouse_name: whById.get(r.warehouse_id) ?? null,
+            })
+          } else {
+            // Sin info de almacén origen: artículo antiguo, sólo informativo
+            preview.push({
+              product_id: r.product_id,
+              product_name: r.product_name ?? 'Artículo',
+              variant_size: r.variant_size ?? null,
+              leftover: Math.max(0, assigned - sold),
+              sold,
+              origin_warehouse_id: null,
+              origin_warehouse_name: null,
+            })
+          }
+        }
         setDeletePreview(preview)
       }).catch(() => {})
     }
@@ -337,20 +377,27 @@ export default function EventsPage() {
                 Vas a eliminar <span className="text-white font-semibold">{actionEvent.event.name}</span>. Esta acción no se puede deshacer.
               </p>
 
-              {/* Previsualización: qué stock se va a devolver y de dónde vino */}
+              {/* Previsualización: una línea por (artículo + talla + almacén origen) */}
               {deletePreview.length > 0 && (
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 space-y-1.5 max-h-40 overflow-y-auto">
                   <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Stock a devolver</p>
-                  {deletePreview.map(p => {
+                  {deletePreview.map((p, idx) => {
                     const total = p.leftover + p.sold
                     return (
-                      <div key={`${p.product_id}-${p.variant_size ?? ''}`} className="flex items-center justify-between gap-2 text-xs">
+                      <div
+                        key={`${p.product_id}-${p.variant_size ?? ''}-${p.origin_warehouse_id ?? 'noorigin'}-${idx}`}
+                        className="flex items-center justify-between gap-2 text-xs"
+                      >
                         <span className="text-white truncate flex-1">
                           {p.product_name}{p.variant_size ? ` · ${p.variant_size}` : ''}
                         </span>
                         <span className="text-zinc-400 shrink-0">{total} ud</span>
-                        <span className="text-amber-400 text-[10px] shrink-0 truncate max-w-[110px]">
-                          {p.origin_warehouse_name ?? 'sin origen'}
+                        <span
+                          className={`text-[10px] shrink-0 truncate max-w-[110px] ${
+                            p.origin_warehouse_name ? 'text-amber-400' : 'text-zinc-600 italic'
+                          }`}
+                        >
+                          {p.origin_warehouse_name ?? 'sin almacén'}
                         </span>
                       </div>
                     )
