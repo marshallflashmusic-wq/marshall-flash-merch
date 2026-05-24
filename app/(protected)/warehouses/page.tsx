@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo, useCallback } from 'react'
 import {
   Warehouse, Plus, Edit2, Trash2, Boxes, Package,
   ChevronDown, AlertTriangle, Check, Download, RotateCcw, ArrowRightLeft,
+  CalendarDays,
 } from 'lucide-react'
 import TopBar from '@/components/layout/TopBar'
 import Card from '@/components/ui/Card'
@@ -78,6 +79,20 @@ export default function WarehousesPage() {
 
   const [assignWh, setAssignWh] = useState<Warehouse | null>(null)
   const [viewWh, setViewWh] = useState<Warehouse | null>(null)
+  type WhReservation = {
+    event_id: string
+    event_name: string
+    event_status: 'upcoming' | 'active' | string
+    product_id: string
+    product_name: string
+    image_url: string | null
+    variant_id: string | null
+    size: string | null
+    sent: number
+    sold: number
+  }
+  const [viewReservations, setViewReservations] = useState<WhReservation[]>([])
+  const [viewReservationsLoading, setViewReservationsLoading] = useState(false)
   const [fillingId, setFillingId] = useState<string | null>(null)
   const [fillResult, setFillResult] = useState<{ id: string; units: number } | null>(null)
   const [unassignedOpen, setUnassignedOpen] = useState(false)
@@ -116,6 +131,22 @@ export default function WarehousesPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Cargar las reservas a conciertos cuando se abre el modal de detalle.
+  useEffect(() => {
+    if (!viewWh) { setViewReservations([]); return }
+    let cancelled = false
+    setViewReservationsLoading(true)
+    fetch(`/api/warehouses/${viewWh.id}/reservations`, { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : { reservations: [] })
+      .then(j => {
+        if (cancelled) return
+        setViewReservations(j.reservations ?? [])
+      })
+      .catch(() => { if (!cancelled) setViewReservations([]) })
+      .finally(() => { if (!cancelled) setViewReservationsLoading(false) })
+    return () => { cancelled = true }
+  }, [viewWh])
 
   // Sin ubicar por (product_id, variant_id|null): stock real - lo ubicado en cualquier almacén.
   const unassignedRows = useMemo(() => {
@@ -637,32 +668,105 @@ export default function WarehousesPage() {
                   <p className="mt-2 text-sm">Sin stock en este almacén</p>
                 </div>
               ) : (
-                <div className="space-y-1.5 max-h-[55vh] overflow-y-auto pr-1">
-                  {detail.map((r, idx) => (
-                    <div
-                      key={`${r.product_id}-${r.variant_id ?? 'none'}-${idx}`}
-                      className="flex items-center gap-3 bg-zinc-800/50 border border-zinc-800 rounded-xl p-2.5"
-                    >
-                      <div className="w-10 h-10 rounded-lg bg-zinc-800 overflow-hidden shrink-0">
-                        {r.image_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={r.image_url} alt={r.product_name} className="w-full h-full object-cover" />
-                        ) : <div className="w-full h-full flex items-center justify-center"><Package size={16} className="text-zinc-600" /></div>}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-semibold truncate">{r.product_name}</p>
-                        {r.size && <p className="text-zinc-500 text-xs mt-0.5">Talla {r.size}</p>}
-                      </div>
-                      <span
-                        className="text-black text-xs font-black px-2 py-1 rounded-lg shrink-0"
-                        style={{ backgroundColor: viewWh.color ?? DEFAULT_WH_COLOR }}
+                <div>
+                  <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Stock actual</p>
+                  <div className="space-y-1.5 max-h-[40vh] overflow-y-auto pr-1">
+                    {detail.map((r, idx) => (
+                      <div
+                        key={`${r.product_id}-${r.variant_id ?? 'none'}-${idx}`}
+                        className="flex items-center gap-3 bg-zinc-800/50 border border-zinc-800 rounded-xl p-2.5"
                       >
-                        {r.quantity} ud
-                      </span>
-                    </div>
-                  ))}
+                        <div className="w-10 h-10 rounded-lg bg-zinc-800 overflow-hidden shrink-0">
+                          {r.image_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={r.image_url} alt={r.product_name} className="w-full h-full object-cover" />
+                          ) : <div className="w-full h-full flex items-center justify-center"><Package size={16} className="text-zinc-600" /></div>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white text-sm font-semibold truncate">{r.product_name}</p>
+                          {r.size && <p className="text-zinc-500 text-xs mt-0.5">Talla {r.size}</p>}
+                        </div>
+                        <span
+                          className="text-black text-xs font-black px-2 py-1 rounded-lg shrink-0"
+                          style={{ backgroundColor: viewWh.color ?? DEFAULT_WH_COLOR }}
+                        >
+                          {r.quantity} ud
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
+
+              {/* Reservas a conciertos abiertos: unidades que ya salieron de este almacén */}
+              {(() => {
+                const reservationsByEvent = new Map<string, { event_name: string; status: string; rows: WhReservation[] }>()
+                for (const r of viewReservations) {
+                  const g = reservationsByEvent.get(r.event_id) ?? { event_name: r.event_name, status: r.event_status, rows: [] }
+                  g.rows.push(r)
+                  reservationsByEvent.set(r.event_id, g)
+                }
+                const grouped = Array.from(reservationsByEvent.entries())
+                const totalSent = viewReservations.reduce((a, r) => a + r.sent, 0)
+                if (viewReservationsLoading) {
+                  return (
+                    <div className="flex items-center justify-center py-4">
+                      <div className="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )
+                }
+                if (grouped.length === 0) return null
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs font-semibold text-amber-400 uppercase tracking-wider">
+                        Reservado a conciertos
+                      </p>
+                      <span className="text-amber-400 text-xs font-bold">{totalSent} ud</span>
+                    </div>
+                    <p className="text-zinc-500 text-[11px] mb-2">
+                      Unidades que salieron de este almacén hacia conciertos abiertos.
+                    </p>
+                    <div className="space-y-2 max-h-[35vh] overflow-y-auto pr-1">
+                      {grouped.map(([eventId, group]) => {
+                        const eventSent = group.rows.reduce((a, r) => a + r.sent, 0)
+                        const eventSold = group.rows.reduce((a, r) => a + r.sold, 0)
+                        return (
+                          <div key={eventId} className="bg-amber-500/5 border border-amber-500/30 rounded-xl p-2.5">
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <CalendarDays size={12} className="text-amber-400 shrink-0" />
+                                <p className="text-white text-sm font-bold truncate">{group.event_name}</p>
+                                <span className={`text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                  group.status === 'active' ? 'bg-green-500/20 text-green-300' : 'bg-zinc-700 text-zinc-300'
+                                }`}>
+                                  {group.status === 'active' ? 'En curso' : 'Próximo'}
+                                </span>
+                              </div>
+                              <span className="text-amber-400 text-xs font-bold shrink-0">
+                                {eventSent} ud{eventSold > 0 ? ` · ${eventSold} vendidas` : ''}
+                              </span>
+                            </div>
+                            <div className="space-y-1">
+                              {group.rows.map((r, idx) => (
+                                <div
+                                  key={`${r.product_id}-${r.variant_id ?? 'none'}-${idx}`}
+                                  className="flex items-center gap-2 text-xs"
+                                >
+                                  <span className="text-zinc-300 flex-1 truncate">
+                                    {r.product_name}{r.size ? ` · Talla ${r.size}` : ''}
+                                  </span>
+                                  <span className="text-zinc-400 shrink-0">{r.sent} ud</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })()}
 
               <div className="flex gap-2 pt-1">
                 <Button variant="outline" fullWidth onClick={() => setViewWh(null)}>Cerrar</Button>
