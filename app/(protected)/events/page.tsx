@@ -616,10 +616,10 @@ function EventCard({
 
   return (
     <Card padding="none" className={status === 'active' ? 'border-amber-500 bg-amber-500/5' : ''}>
-      {/* Card header — pulsable para ver resumen en cerrados */}
+      {/* Card header — pulsable: cerrados → resumen, activos/próximos → stock e info */}
       <div
-        className={`p-4 ${isClosed ? 'cursor-pointer active:bg-white/5 transition-colors' : ''}`}
-        onClick={isClosed ? onOpenSummary : undefined}
+        className="p-4 cursor-pointer active:bg-white/5 transition-colors"
+        onClick={isClosed ? onOpenSummary : onPrepare}
       >
         <div className="flex items-start gap-3">
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${status === 'active' ? 'bg-amber-500/20' : 'bg-zinc-800'}`}>
@@ -637,9 +637,7 @@ function EventCard({
             </div>
             {event.notes && <p className="text-xs text-zinc-600 mt-1.5 italic">{event.notes}</p>}
           </div>
-          {isClosed && (
-            <ChevronRight size={16} className="text-zinc-600 shrink-0 mt-0.5" />
-          )}
+          <ChevronRight size={16} className="text-zinc-600 shrink-0 mt-0.5" />
         </div>
       </div>
 

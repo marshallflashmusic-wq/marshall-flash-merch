@@ -77,6 +77,26 @@ export default function NewSalePage() {
   const [warehouseStock, setWarehouseStock] = useState<{ warehouse_id: string; product_id: string; variant_id: string | null; quantity: number }[]>([])
   const [quickWarehouseId, setQuickWarehouseId] = useState('')
 
+  // Desglose de stock por almacén para cada producto (suma de todas las variantes).
+  // Solo se usa en venta rápida para mostrar chips con el nombre del almacén.
+  const warehouseStockByProduct = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; color: string | null; quantity: number }[]>()
+    const whById = new Map(warehouses.map(w => [w.id, w] as const))
+    for (const s of warehouseStock) {
+      if (s.quantity <= 0) continue
+      const wh = whById.get(s.warehouse_id)
+      if (!wh) continue
+      const list = m.get(s.product_id) ?? []
+      const existing = list.find(e => e.id === wh.id)
+      if (existing) existing.quantity += s.quantity
+      else list.push({ id: wh.id, name: wh.name, color: wh.color, quantity: s.quantity })
+      m.set(s.product_id, list)
+    }
+    // Ordenar cada lista por cantidad descendente
+    for (const list of m.values()) list.sort((a, b) => b.quantity - a.quantity)
+    return m
+  }, [warehouseStock, warehouses])
+
   const loadWarehouseData = useCallback(() => {
     fetch('/api/warehouses/overview', { cache: 'no-store' })
       .then(r => r.json())
@@ -372,6 +392,7 @@ export default function NewSalePage() {
                       quantity={productQty(product.id)}
                       hasVariants={isTextile}
                       showStockAlways={isEventMode}
+                      warehouseBreakdown={isEventMode ? undefined : warehouseStockByProduct.get(product.id)}
                       onAdd={() => {
                         if (isTextile) setSizePickerProduct(product)
                         else cart.addProduct(product)
@@ -500,12 +521,13 @@ export default function NewSalePage() {
 // ─── Tarjeta de producto ────────────────────────────────────────────────────
 
 function ProductCard({
-  product, quantity, hasVariants, showStockAlways, onAdd, onDecrease,
+  product, quantity, hasVariants, showStockAlways, warehouseBreakdown, onAdd, onDecrease,
 }: {
   product: Product
   quantity: number
   hasVariants: boolean
   showStockAlways?: boolean
+  warehouseBreakdown?: { id: string; name: string; color: string | null; quantity: number }[]
   onAdd: () => void
   onDecrease: () => void
 }) {
@@ -557,6 +579,31 @@ function ProductCard({
 
       <div className="p-2.5">
         <p className="text-white text-sm font-semibold leading-tight line-clamp-1">{product.name}</p>
+
+        {/* Chips por almacén (solo en venta rápida) */}
+        {warehouseBreakdown && warehouseBreakdown.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {warehouseBreakdown.map(w => {
+              const color = w.color ?? '#71717a'
+              return (
+                <span
+                  key={w.id}
+                  className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5"
+                  style={{ borderColor: color + '99', backgroundColor: color + '14' }}
+                  title={`${w.name}: ${w.quantity} ud`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                  <span className="text-[10px] font-semibold truncate max-w-[60px]" style={{ color }}>{w.name}</span>
+                  <span className="text-[10px] text-zinc-400">·{w.quantity}</span>
+                </span>
+              )
+            })}
+          </div>
+        )}
+        {warehouseBreakdown && warehouseBreakdown.length === 0 && !product.stock && (
+          <p className="text-[10px] text-zinc-600 mt-1.5">Sin stock en almacenes</p>
+        )}
+
         <div className="flex items-center justify-between mt-1.5">
           <p className="text-white font-black text-base">{formatCurrency(product.sale_price)}</p>
 
