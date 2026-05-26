@@ -35,6 +35,7 @@ export interface Product {
   size?: string
   purchase_price: number
   sale_price: number
+  online_price?: number | null
   stock: number
   min_stock: number
   image_url?: string
@@ -50,6 +51,7 @@ export interface Pack {
   name: string
   description?: string
   sale_price: number
+  online_price?: number | null
   image_url?: string
   active: boolean
   items?: PackItem[]
@@ -106,6 +108,8 @@ export type TpvFlow = 'event' | 'quick' | null
 
 export type PaymentMethod = 'efectivo' | 'bizum' | 'tarjeta' | 'paypal' | 'mixto'
 
+export type SaleChannel = 'pos' | 'web'
+
 export interface Sale {
   id: string
   event_id?: string
@@ -120,6 +124,9 @@ export interface Sale {
   synced: boolean
   seller_name?: string | null
   seller_type?: 'admin' | 'tpv' | null
+  sale_channel?: SaleChannel
+  shipping_cost?: number
+  shipping_actual_cost?: number
   created_at: string
   items?: SaleItem[]
 }
@@ -207,6 +214,7 @@ export interface SaleFilters {
   payment_method?: PaymentMethod
   amount_min?: number
   amount_max?: number
+  sale_channel?: SaleChannel
 }
 
 export interface OfflineSale {

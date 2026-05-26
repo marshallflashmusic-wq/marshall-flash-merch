@@ -38,7 +38,7 @@ interface PackItemBody {
 export async function POST(request: NextRequest) {
   const supabase = getServiceClient()
   const body = await request.json()
-  const { name, description, sale_price, items } = body
+  const { name, description, sale_price, online_price, items } = body
 
   if (!name || sale_price == null) {
     return NextResponse.json({ error: 'Nombre y precio son obligatorios' }, { status: 400 })
@@ -46,7 +46,13 @@ export async function POST(request: NextRequest) {
 
   const { data: pack, error: packError } = await supabase
     .from('packs')
-    .insert({ name, description: description || null, sale_price, active: true })
+    .insert({
+      name,
+      description: description || null,
+      sale_price,
+      online_price: online_price ?? null,
+      active: true,
+    })
     .select()
     .single()
 
@@ -74,7 +80,7 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const supabase = getServiceClient()
   const body = await request.json()
-  const { id, name, description, sale_price, active, items } = body
+  const { id, name, description, sale_price, online_price, active, items } = body
 
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
@@ -82,6 +88,7 @@ export async function PATCH(request: NextRequest) {
   if (name !== undefined) updateData.name = name
   if (description !== undefined) updateData.description = description || null
   if (sale_price !== undefined) updateData.sale_price = sale_price
+  if (online_price !== undefined) updateData.online_price = online_price
   if (active !== undefined) updateData.active = active
 
   const { error: packError } = await supabase

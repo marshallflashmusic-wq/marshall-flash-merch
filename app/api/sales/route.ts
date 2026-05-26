@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
   const payment_method = searchParams.get('payment_method')
   const amount_min = searchParams.get('amount_min')
   const amount_max = searchParams.get('amount_max')
+  const sale_channel = searchParams.get('sale_channel')
 
   if (date_from) query = query.gte('created_at', date_from)
   if (date_to) query = query.lte('created_at', date_to + 'T23:59:59')
@@ -43,6 +44,7 @@ export async function GET(request: NextRequest) {
   if (payment_method) query = query.eq('payment_method', payment_method)
   if (amount_min) query = query.gte('total_amount', parseFloat(amount_min))
   if (amount_max) query = query.lte('total_amount', parseFloat(amount_max))
+  if (sale_channel) query = query.eq('sale_channel', sale_channel)
 
   const { data, count, error } = await query.limit(100)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

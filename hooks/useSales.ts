@@ -4,7 +4,7 @@ import { savePendingSale, getPendingSales, deleteSyncedSale } from '@/lib/offlin
 import { generateId } from '@/lib/utils'
 import { useAppStore } from '@/store/appStore'
 import { createClient } from '@/lib/supabase/client'
-import type { Sale, SaleFilters, CartItem, PaymentMethod, OfflineSale } from '@/types'
+import type { Sale, SaleFilters, CartItem, PaymentMethod, OfflineSale, SaleChannel } from '@/types'
 
 export function useSales() {
   const [loading, setLoading] = useState(false)
@@ -20,6 +20,9 @@ export function useSales() {
     options?: {
       eventInventoryResolver?: (productId: string, variantId: string | null) => string | undefined
       quickSaleWarehouseId?: string
+      saleChannel?: SaleChannel
+      shippingCost?: number
+      shippingActualCost?: number
     }
   ): Promise<{ success: boolean; saleId?: string; error?: string }> => {
     // Protección doble envío: ignorar si ya hay una petición en vuelo
@@ -28,8 +31,15 @@ export function useSales() {
     setLoading(true)
 
     try {
-      const total  = items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0)
-      const cost   = items.reduce((acc, i) => acc + i.unit_cost  * i.quantity, 0)
+      const itemsTotal = items.reduce((acc, i) => acc + i.unit_price * i.quantity, 0)
+      const shippingCost = Math.max(0, Number(options?.shippingCost ?? 0) || 0)
+      const shippingActualCost = Math.max(0, Number(options?.shippingActualCost ?? 0) || 0)
+      // Total facturado al cliente = artículos + envío pagado
+      const total = itemsTotal + shippingCost
+      // Coste real para la empresa = coste de artículos + envío real
+      // La diferencia (shippingCost - shippingActualCost) se traduce en profit.
+      const itemsCost = items.reduce((acc, i) => acc + i.unit_cost * i.quantity, 0)
+      const cost = itemsCost + shippingActualCost
       const profit = total - cost
 
       const resolver = options?.eventInventoryResolver
@@ -118,6 +128,9 @@ export function useSales() {
         notes:          notes || null,
         seller_name:    sellerName,
         seller_type:    sellerType,
+        sale_channel:        options?.saleChannel ?? 'pos',
+        shipping_cost:       shippingCost,
+        shipping_actual_cost: shippingActualCost,
       }
 
       if (!isOnline) {
@@ -223,6 +236,7 @@ export function useSalesHistory(filters: SaleFilters = {}) {
     if (filters.payment_method) params.set('payment_method', filters.payment_method)
     if (filters.amount_min != null) params.set('amount_min', String(filters.amount_min))
     if (filters.amount_max != null) params.set('amount_max', String(filters.amount_max))
+    if (filters.sale_channel) params.set('sale_channel', filters.sale_channel)
 
     try {
       const res = await fetch(`/api/sales?${params.toString()}`)
@@ -235,7 +249,7 @@ export function useSalesHistory(filters: SaleFilters = {}) {
       console.error('[useSales] Error cargando historial:', e)
     }
     setLoading(false)
-  }, [filters.date_from, filters.date_to, filters.event_id, filters.user_id, filters.payment_method, filters.amount_min, filters.amount_max])
+  }, [filters.date_from, filters.date_to, filters.event_id, filters.user_id, filters.payment_method, filters.amount_min, filters.amount_max, filters.sale_channel])
 
   useEffect(() => { loadSales() }, [loadSales])
 

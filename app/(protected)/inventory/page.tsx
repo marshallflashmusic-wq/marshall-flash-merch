@@ -488,6 +488,7 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
     sku: '',
     purchase_price: '',
     sale_price: '',
+    online_price: '',
     stock: '0',
     min_stock: '2',
     image_url: '',
@@ -510,6 +511,7 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
         sku: product.sku ?? '',
         purchase_price: String(product.purchase_price),
         sale_price: String(product.sale_price),
+        online_price: product.online_price != null ? String(product.online_price) : '',
         stock: String(product.stock),
         min_stock: String(product.min_stock),
         image_url: product.image_url ?? '',
@@ -526,7 +528,7 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
         setSizeStocks({})
       }
     } else {
-      setForm({ name: '', category_id: '', sku: '', purchase_price: '', sale_price: '', stock: '0', min_stock: '2', image_url: '' })
+      setForm({ name: '', category_id: '', sku: '', purchase_price: '', sale_price: '', online_price: '', stock: '0', min_stock: '2', image_url: '' })
       setSizeStocks({})
     }
   }, [product, open])
@@ -566,6 +568,7 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
       sku: form.sku.trim() || undefined,
       purchase_price: parseFloat(form.purchase_price) || 0,
       sale_price: parseFloat(form.sale_price),
+      online_price: form.online_price.trim() === '' ? null : parseFloat(form.online_price),
       stock: stockValue,
       min_stock: parseInt(form.min_stock) || 2,
       image_url: form.image_url || undefined,
@@ -709,6 +712,17 @@ function ProductModal({ open, product, categories, onClose, onSave, saving }: {
             error={fieldErrors.sale_price}
           />
         </div>
+
+        {/* Precio online (opcional) */}
+        <Input
+          label="Precio online (€) — opcional"
+          type="number"
+          step="0.01"
+          min="0"
+          placeholder="Vacío = usa el PVP normal"
+          value={form.online_price}
+          onChange={e => setForm(f => ({ ...f, online_price: e.target.value }))}
+        />
 
         {/* SKU */}
         <Input

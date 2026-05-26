@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
-import { Clock, Filter, Banknote, Smartphone, CreditCard, Wallet, Download, X, Trash2, MessageSquare, Pencil, Package2, CalendarDays, Zap, Warehouse } from 'lucide-react'
+import { Clock, Filter, Banknote, Smartphone, CreditCard, Wallet, Download, X, Trash2, MessageSquare, Pencil, Package2, CalendarDays, Zap, Warehouse, Globe } from 'lucide-react'
 import { useSalesHistory } from '@/hooks/useSales'
 import { useEvents } from '@/hooks/useEvents'
 import { useAppStore } from '@/store/appStore'
@@ -11,9 +11,9 @@ import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import Modal from '@/components/ui/Modal'
 import SwipeableTabs from '@/components/ui/SwipeableTabs'
-import type { Sale, PaymentMethod, SaleFilters } from '@/types'
+import type { Sale, PaymentMethod, SaleFilters, SaleChannel } from '@/types'
 
-type ScopeTab = 'all' | 'events' | 'quick'
+type ScopeTab = 'all' | 'events' | 'quick' | 'web'
 
 const paymentIcons: Record<PaymentMethod, React.ElementType> = {
   efectivo: Banknote,
@@ -72,8 +72,12 @@ export default function SalesHistoryPage() {
   const total = skipFetch ? 0 : rawTotal
   const [scope, setScope] = useState<ScopeTab>('all')
 
-  const eventCount = useMemo(() => sales.filter(s => !!s.event_id).length, [sales])
-  const quickCount = useMemo(() => sales.filter(s => !s.event_id).length, [sales])
+  // Ventas presenciales (POS): rápidas + de concierto. Las web se desglosan aparte.
+  const presencialSales = useMemo(() => sales.filter(s => s.sale_channel !== 'web'), [sales])
+  const webSales = useMemo(() => sales.filter(s => s.sale_channel === 'web'), [sales])
+  const eventCount = useMemo(() => presencialSales.filter(s => !!s.event_id).length, [presencialSales])
+  const quickCount = useMemo(() => presencialSales.filter(s => !s.event_id).length, [presencialSales])
+  const webCount = useMemo(() => webSales.length, [webSales])
 
   // Auto-refresco cada 10s + al volver a la pestaña
   useEffect(() => {
@@ -292,13 +296,18 @@ export default function SalesHistoryPage() {
                 filters={filters} clearFilters={() => setFilters({})}
                 deletingId={deletingId} onSelect={(s) => setSelectedSale(s)} onEdit={openEdit} onDelete={handleDelete} />
             )},
-            { key: 'events', label: <TabLabel text="En conciertos"  count={eventCount}   active={scope === 'events'} />, content: (
+            { key: 'events', label: <TabLabel text="Conciertos"  count={eventCount}   active={scope === 'events'} />, content: (
               <ScopeContent panelScope="events" sales={sales} loading={loading} isSaleMode={false}
                 filters={filters} clearFilters={() => setFilters({})}
                 deletingId={deletingId} onSelect={(s) => setSelectedSale(s)} onEdit={openEdit} onDelete={handleDelete} />
             )},
             { key: 'quick',  label: <TabLabel text="Rápidas"        count={quickCount}   active={scope === 'quick'} />,  content: (
               <ScopeContent panelScope="quick"  sales={sales} loading={loading} isSaleMode={false}
+                filters={filters} clearFilters={() => setFilters({})}
+                deletingId={deletingId} onSelect={(s) => setSelectedSale(s)} onEdit={openEdit} onDelete={handleDelete} />
+            )},
+            { key: 'web',    label: <TabLabel text="Web"            count={webCount}     active={scope === 'web'} />,    content: (
+              <ScopeContent panelScope="web"    sales={sales} loading={loading} isSaleMode={false}
                 filters={filters} clearFilters={() => setFilters({})}
                 deletingId={deletingId} onSelect={(s) => setSelectedSale(s)} onEdit={openEdit} onDelete={handleDelete} />
             )},
@@ -351,6 +360,30 @@ export default function SalesHistoryPage() {
                     </span>
                   </span>
                 </div>
+              )}
+              {selectedSale.sale_channel === 'web' && (
+                <>
+                  <div className="flex justify-between py-1 border-t border-zinc-800">
+                    <span className="text-zinc-500">Envío cobrado</span>
+                    <span className="text-white">{formatCurrency(selectedSale.shipping_cost ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-zinc-500">Envío real</span>
+                    <span className="text-white">{formatCurrency(selectedSale.shipping_actual_cost ?? 0)}</span>
+                  </div>
+                  {(() => {
+                    const diff = (selectedSale.shipping_cost ?? 0) - (selectedSale.shipping_actual_cost ?? 0)
+                    if (Math.abs(diff) < 0.001) return null
+                    return (
+                      <div className="flex justify-between py-1">
+                        <span className="text-zinc-500">Diferencia envío</span>
+                        <span className={diff >= 0 ? 'text-green-400 font-semibold' : 'text-red-400 font-semibold'}>
+                          {diff >= 0 ? '+' : ''}{formatCurrency(diff)}
+                        </span>
+                      </div>
+                    )
+                  })()}
+                </>
               )}
             </div>
             {selectedSale.notes && (
@@ -492,15 +525,34 @@ export default function SalesHistoryPage() {
           const hasItems = deleteConfirm.sale.items && deleteConfirm.sale.items.length > 0
           const singleWarehouseName = warehouses.length === 1 ? warehouses[0].name : null
           const setMode = (m: RestoreMode) => setDeleteConfirm(prev => prev ? { ...prev, mode: m } : null)
+          const isWebSale = deleteConfirm.sale.sale_channel === 'web'
           return (
             <div className="space-y-4">
               <p className="text-zinc-300 text-sm">
-                ¿Seguro que quieres eliminar esta venta de{' '}
+                ¿Seguro que quieres eliminar {isWebSale ? 'este pedido web' : 'esta venta'} de{' '}
                 <span className="text-white font-semibold">{formatCurrency(deleteConfirm.sale.total_amount)}</span>?
                 Esta acción no se puede deshacer.
               </p>
 
-              {hasItems && (
+              {hasItems && isWebSale && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-zinc-400">¿Qué hacer con el stock?</p>
+                  <RestoreModeOption
+                    selected={deleteConfirm.mode === 'origin'}
+                    onSelect={() => setMode('origin')}
+                    title="Restaurar stock global"
+                    description="Devuelve las unidades al stock general (el pedido web no tiene almacén de origen)."
+                  />
+                  <RestoreModeOption
+                    selected={deleteConfirm.mode === 'none'}
+                    onSelect={() => setMode('none')}
+                    title="No restaurar stock"
+                    description="Solo borrar el pedido. El stock no se reincorpora."
+                  />
+                </div>
+              )}
+
+              {hasItems && !isWebSale && (
                 <div className="space-y-2">
                   <p className="text-xs font-medium text-zinc-400">¿Qué hacer con el stock?</p>
 
@@ -653,6 +705,19 @@ export default function SalesHistoryPage() {
             </select>
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm text-zinc-400">Canal</label>
+            <select
+              value={filters.sale_channel ?? ''}
+              onChange={e => setFilters(f => ({ ...f, sale_channel: (e.target.value as SaleChannel) || undefined }))}
+              className="bg-zinc-800 border border-zinc-700 rounded-xl py-2.5 px-3 text-white text-sm focus:outline-none focus:border-white"
+            >
+              <option value="">Todos</option>
+              <option value="pos">Presencial (rápida o concierto)</option>
+              <option value="web">Pedido web</option>
+            </select>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <label className="text-sm text-zinc-400">Precio mínimo (€)</label>
@@ -719,7 +784,12 @@ function SaleRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-white font-semibold text-sm">{formatCurrency(sale.total_amount)}</p>
-            {sale.event ? (
+            {sale.sale_channel === 'web' ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-950/60 text-purple-300 border border-purple-900/50">
+                <Globe size={9} />
+                Web
+              </span>
+            ) : sale.event ? (
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-950/60 text-amber-400 border border-amber-900/50">
                 <CalendarDays size={9} />
                 {sale.event.name}
@@ -841,11 +911,14 @@ function ScopeContent({
   onEdit: (s: Sale) => void
   onDelete: (s: Sale) => void
 }) {
+  // Para conciertos y rápidas excluimos las ventas web (van en su propia pestaña)
   const scoped = panelScope === 'events'
-    ? sales.filter(s => !!s.event_id)
+    ? sales.filter(s => !!s.event_id && s.sale_channel !== 'web')
     : panelScope === 'quick'
-      ? sales.filter(s => !s.event_id)
-      : sales
+      ? sales.filter(s => !s.event_id && s.sale_channel !== 'web')
+      : panelScope === 'web'
+        ? sales.filter(s => s.sale_channel === 'web')
+        : sales
 
   const totalRevenue = scoped.reduce((a, s) => a + s.total_amount, 0)
   const totalProfit  = scoped.reduce((a, s) => a + s.profit, 0)
@@ -907,7 +980,10 @@ function ScopeContent({
           <div className="flex flex-col items-center justify-center py-20 text-zinc-600">
             <Clock size={40} />
             <p className="mt-3 text-sm">
-              {panelScope === 'events' ? 'No hay ventas en conciertos' : panelScope === 'quick' ? 'No hay ventas rápidas' : 'No hay ventas registradas'}
+              {panelScope === 'events' ? 'No hay ventas en conciertos'
+                : panelScope === 'quick' ? 'No hay ventas rápidas'
+                : panelScope === 'web' ? 'No hay pedidos web'
+                : 'No hay ventas registradas'}
             </p>
           </div>
         ) : panelScope === 'events' ? (

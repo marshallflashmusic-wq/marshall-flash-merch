@@ -35,7 +35,7 @@ const PacksManager = forwardRef<PacksManagerRef, Props>(({ products }, ref) => {
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [apiError, setApiError] = useState('')
-  const [form, setForm] = useState({ name: '', description: '', sale_price: '' })
+  const [form, setForm] = useState({ name: '', description: '', sale_price: '', online_price: '' })
   const [packItems, setPackItems] = useState<PackItemForm[]>([])
 
   const loadPacks = async () => {
@@ -83,7 +83,7 @@ const PacksManager = forwardRef<PacksManagerRef, Props>(({ products }, ref) => {
   // ── Open / close modal ──
   const openNew = () => {
     setEditPack(null)
-    setForm({ name: '', description: '', sale_price: '' })
+    setForm({ name: '', description: '', sale_price: '', online_price: '' })
     setPackItems([])
     setApiError('')
     setShowModal(true)
@@ -97,6 +97,7 @@ const PacksManager = forwardRef<PacksManagerRef, Props>(({ products }, ref) => {
       name: pack.name,
       description: pack.description ?? '',
       sale_price: String(pack.sale_price),
+      online_price: pack.online_price != null ? String(pack.online_price) : '',
     })
     setPackItems(pack.items?.map(i => ({
       product_id: i.product_id,
@@ -120,11 +121,13 @@ const PacksManager = forwardRef<PacksManagerRef, Props>(({ products }, ref) => {
       individual_pack_price: i.individual_pack_price ? parseFloat(i.individual_pack_price) : null,
     }))
 
+    const onlinePrice = form.online_price.trim() === '' ? null : parseFloat(form.online_price)
+
     try {
       const method = editPack ? 'PATCH' : 'POST'
       const body = editPack
-        ? { id: editPack.id, name: form.name.trim(), description: form.description, sale_price: parseFloat(form.sale_price), items }
-        : { name: form.name.trim(), description: form.description, sale_price: parseFloat(form.sale_price), items }
+        ? { id: editPack.id, name: form.name.trim(), description: form.description, sale_price: parseFloat(form.sale_price), online_price: onlinePrice, items }
+        : { name: form.name.trim(), description: form.description, sale_price: parseFloat(form.sale_price), online_price: onlinePrice, items }
 
       const res = await fetch('/api/packs', {
         method,
@@ -316,6 +319,16 @@ const PacksManager = forwardRef<PacksManagerRef, Props>(({ products }, ref) => {
               </div>
             </div>
           </div>
+
+          <Input
+            label="Precio online (€) — opcional"
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="Vacío = usa el precio de venta normal"
+            value={form.online_price}
+            onChange={e => setForm(f => ({ ...f, online_price: e.target.value }))}
+          />
 
           {/* Ahorro preview */}
           {packSalePrice > 0 && normalTotal > 0 && (

@@ -6,7 +6,7 @@ import {
   Banknote, CreditCard, Smartphone, Wallet, ChevronRight,
   Package2, LogOut, Wifi, WifiOff, RefreshCw, X,
   Zap, CalendarDays, MapPin, Building2, RotateCcw, ChevronLeft,
-  Bell,
+  Bell, Globe,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { getDeviceId } from '@/lib/deviceId'
@@ -45,7 +45,7 @@ export default function NewSalePage() {
   const { createSale, loading: creating } = useSales()
   const cart = useCartStore()
   const {
-    isSaleMode, isOnline, pendingSyncCount, setSaleMode, tpvSession,
+    user, isSaleMode, isOnline, pendingSyncCount, setSaleMode, tpvSession,
     tpvFlow, setTpvFlow, activeEvent, setActiveEvent,
   } = useAppStore()
 
@@ -246,6 +246,7 @@ export default function NewSalePage() {
             setTpvFlow('event')
           }
         }}
+        onPickWeb={user?.role === 'boss' ? () => router.push('/sales/web') : undefined}
         onBack={isSaleMode ? undefined : handleBackToDashboard}
         onExit={isSaleMode ? handleExitSaleMode : undefined}
         hasActiveEvent={activeEvents.length > 0}
@@ -1167,9 +1168,10 @@ function EmptyState({ icon, text, hint }: { icon: React.ReactNode; text: string;
 }
 
 // ─── Selector de modo: Evento vs Venta rápida ───────────────────────────────
-function TpvModeSelector({ onPickQuick, onPickEvent, onBack, onExit, hasActiveEvent }: {
+function TpvModeSelector({ onPickQuick, onPickEvent, onPickWeb, onBack, onExit, hasActiveEvent }: {
   onPickQuick: () => void
   onPickEvent: () => void
+  onPickWeb?: () => void
   onBack?: () => void
   onExit?: () => void
   hasActiveEvent: boolean
@@ -1210,6 +1212,18 @@ function TpvModeSelector({ onPickQuick, onPickEvent, onBack, onExit, hasActiveEv
             <p className="text-black/60 text-sm font-medium mt-1">Stock global · backstage, ensayos, ventas sueltas</p>
           </div>
         </button>
+        {onPickWeb && (
+          <button
+            onClick={onPickWeb}
+            className="bg-purple-500 hover:bg-purple-400 rounded-3xl p-7 flex flex-col items-center gap-3 active:scale-[0.98] transition-transform shadow-2xl shadow-purple-500/20"
+          >
+            <Globe size={44} className="text-white" strokeWidth={2.5} />
+            <div className="text-center">
+              <p className="text-white text-2xl font-black leading-none">PEDIDO WEB</p>
+              <p className="text-white/80 text-sm font-medium mt-1">Solo Boss · incluye gastos de envío</p>
+            </div>
+          </button>
+        )}
         <p className="text-zinc-600 text-xs text-center mt-2">
           {hasActiveEvent ? (
             <>Modo concierto: descuenta del stock reservado para el concierto y del global.<br />Venta rápida: descuenta del inventario general.</>
