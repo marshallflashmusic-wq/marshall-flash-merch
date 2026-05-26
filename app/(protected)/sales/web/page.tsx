@@ -1,9 +1,9 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ShoppingCart, Plus, Minus, Trash2, Package, Package2, Check, ChevronLeft,
-  CreditCard, Wallet, Globe, Truck,
+  CreditCard, Wallet, Globe, Truck, Building2,
 } from 'lucide-react'
 import { useProducts } from '@/hooks/useProducts'
 import { usePacks } from '@/hooks/usePacks'
@@ -46,6 +46,71 @@ export default function WebOrderPage() {
   const [saleError, setSaleError] = useState('')
   const [sizePicker, setSizePicker] = useState<Product | null>(null)
   const [packSizePicker, setPackSizePicker] = useState<Pack | null>(null)
+  const [warehouses, setWarehouses] = useState<{ id: string; name: string; color: string | null }[]>([])
+  const [warehouseStock, setWarehouseStock] = useState<{ warehouse_id: string; product_id: string; variant_id: string | null; quantity: number }[]>([])
+
+  useEffect(() => {
+    fetch('/api/warehouses/overview', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(j => {
+        setWarehouses(j.warehouses ?? [])
+        setWarehouseStock(j.stock ?? [])
+      })
+      .catch(() => {})
+  }, [])
+
+  // Mapa: product_id::variant_id -> Map(warehouse_id -> cantidad disponible)
+  const stockByWh = useMemo(() => {
+    const m = new Map<string, Map<string, number>>()
+    for (const s of warehouseStock) {
+      const key = `${s.product_id}::${s.variant_id ?? ''}`
+      let inner = m.get(key)
+      if (!inner) { inner = new Map(); m.set(key, inner) }
+      inner.set(s.warehouse_id, (inner.get(s.warehouse_id) ?? 0) + s.quantity)
+    }
+    return m
+  }, [warehouseStock])
+
+  const warehousesForItem = useCallback((item: CartItem) => {
+    if (item.type === 'product' && item.product) {
+      const key = `${item.product.id}::${item.variant_id ?? ''}`
+      const inner = stockByWh.get(key) ?? new Map<string, number>()
+      return warehouses
+        .map(w => ({ id: w.id, name: w.name, color: w.color, available: inner.get(w.id) ?? 0 }))
+        .filter(w => w.available > 0)
+    }
+    if (item.type === 'pack' && item.pack?.items) {
+      const perWh = new Map<string, number>()
+      for (const wh of warehouses) {
+        let minPossible = Infinity
+        for (const pi of item.pack.items) {
+          const sizeSel = item.packSizeSelections?.find(s => s.product_id === pi.product_id)
+          const k = `${pi.product_id}::${sizeSel?.variant_id ?? ''}`
+          const avail = stockByWh.get(k)?.get(wh.id) ?? 0
+          minPossible = Math.min(minPossible, Math.floor(avail / pi.quantity))
+        }
+        if (minPossible > 0 && minPossible !== Infinity) perWh.set(wh.id, minPossible)
+      }
+      return warehouses
+        .map(w => ({ id: w.id, name: w.name, color: w.color, available: perWh.get(w.id) ?? 0 }))
+        .filter(w => w.available > 0)
+    }
+    return []
+  }, [warehouses, stockByWh])
+
+  const setItemWarehouse = (itemId: string, warehouseId: string | null) => {
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, warehouse_id: warehouseId ?? undefined } : i))
+  }
+
+  // Auto-asignar almacén al abrir el modal del carrito
+  useEffect(() => {
+    if (!showCart || warehouses.length === 0) return
+    setItems(prev => prev.map(i => {
+      if (i.warehouse_id) return i
+      const opts = warehousesForItem(i)
+      return opts.length > 0 ? { ...i, warehouse_id: opts[0].id } : i
+    }))
+  }, [showCart, warehouses.length, warehousesForItem])
 
   const cartCount = items.reduce((a, i) => a + i.quantity, 0)
   const itemsTotal = items.reduce((a, i) => a + i.unit_price * i.quantity, 0)
@@ -313,27 +378,60 @@ export default function WebOrderPage() {
                 const label = it.type === 'product'
                   ? `${it.product?.name ?? ''}${it.size ? ` · ${it.size}` : ''}`
                   : `${it.pack?.name ?? 'Pack'}${it.packSizeSelections?.length ? ` · ${it.packSizeSelections.map(s => s.size).join('/')}` : ''}`
+                const whOpts = warehousesForItem(it)
+                const showWhPicker = warehouses.length > 0
+                const selectedWh = whOpts.find(o => o.id === it.warehouse_id)
+                const exceeds = it.warehouse_id && selectedWh && it.quantity > selectedWh.available
                 return (
-                  <div key={it.id} className="flex items-center gap-2 p-2 bg-zinc-800/50 rounded-xl">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white text-sm font-semibold truncate">{label}</p>
-                      <p className="text-zinc-500 text-xs">{formatCurrency(it.unit_price)} · {it.quantity} ud{it.quantity !== 1 ? 's' : ''}</p>
+                  <div key={it.id} className="p-2 bg-zinc-800/50 rounded-xl space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-semibold truncate">{label}</p>
+                        <p className="text-zinc-500 text-xs">{formatCurrency(it.unit_price)} · {it.quantity} ud{it.quantity !== 1 ? 's' : ''}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => decreaseItem(it.id)}
+                          className="w-7 h-7 rounded-lg bg-zinc-700 flex items-center justify-center active:scale-90"
+                        >
+                          <Minus size={12} />
+                        </button>
+                        <span className="text-white font-bold text-sm w-5 text-center">{it.quantity}</span>
+                        <button
+                          onClick={() => removeItem(it.id)}
+                          className="w-7 h-7 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center active:scale-90"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => decreaseItem(it.id)}
-                        className="w-7 h-7 rounded-lg bg-zinc-700 flex items-center justify-center active:scale-90"
-                      >
-                        <Minus size={12} />
-                      </button>
-                      <span className="text-white font-bold text-sm w-5 text-center">{it.quantity}</span>
-                      <button
-                        onClick={() => removeItem(it.id)}
-                        className="w-7 h-7 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center active:scale-90"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
+                    {showWhPicker && (
+                      <div className="flex items-center gap-2">
+                        <Building2 size={11} className="text-zinc-500 shrink-0" />
+                        {whOpts.length === 0 ? (
+                          <span className="text-red-400 text-[11px]">Sin stock en almacenes</span>
+                        ) : whOpts.length === 1 ? (
+                          <span className="text-zinc-400 text-[11px] truncate">
+                            {whOpts[0].name} · {whOpts[0].available} disp.
+                          </span>
+                        ) : (
+                          <select
+                            value={it.warehouse_id ?? ''}
+                            onChange={e => setItemWarehouse(it.id, e.target.value || null)}
+                            className={`flex-1 bg-zinc-900 border rounded-lg py-1 px-2 text-[11px] focus:outline-none focus:border-purple-500 ${
+                              exceeds ? 'border-red-700 text-red-300' : 'border-zinc-700 text-zinc-200'
+                            }`}
+                          >
+                            {whOpts.map(w => (
+                              <option key={w.id} value={w.id}>
+                                {w.name} · {w.available} disp.
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        {exceeds && <span className="text-red-400 text-[10px] shrink-0">¡Excede!</span>}
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -453,16 +551,36 @@ export default function WebOrderPage() {
             </p>
           )}
 
-          <Button
-            fullWidth
-            size="lg"
-            onClick={handleSubmit}
-            loading={creating}
-            disabled={items.length === 0 || creating}
-            className="bg-purple-500 hover:bg-purple-400 text-white"
-          >
-            Registrar pedido web
-          </Button>
+          {(() => {
+            const missingWh = warehouses.length > 0 && items.some(i => !i.warehouse_id)
+            const someExceeds = items.some(i => {
+              if (!i.warehouse_id) return false
+              const opts = warehousesForItem(i)
+              const sel = opts.find(o => o.id === i.warehouse_id)
+              return sel ? i.quantity > sel.available : false
+            })
+            const disabled = items.length === 0 || creating || missingWh || someExceeds
+            return (
+              <>
+                {missingWh && (
+                  <p className="text-amber-400 text-xs">Selecciona almacén de origen para cada artículo.</p>
+                )}
+                {someExceeds && (
+                  <p className="text-red-400 text-xs">Alguna línea supera el stock disponible del almacén elegido.</p>
+                )}
+                <Button
+                  fullWidth
+                  size="lg"
+                  onClick={handleSubmit}
+                  loading={creating}
+                  disabled={disabled}
+                  className="bg-purple-500 hover:bg-purple-400 text-white"
+                >
+                  Registrar pedido web
+                </Button>
+              </>
+            )
+          })()}
         </div>
       </Modal>
 

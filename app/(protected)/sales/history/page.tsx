@@ -534,25 +534,7 @@ export default function SalesHistoryPage() {
                 Esta acción no se puede deshacer.
               </p>
 
-              {hasItems && isWebSale && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-zinc-400">¿Qué hacer con el stock?</p>
-                  <RestoreModeOption
-                    selected={deleteConfirm.mode === 'origin'}
-                    onSelect={() => setMode('origin')}
-                    title="Restaurar stock global"
-                    description="Devuelve las unidades al stock general (el pedido web no tiene almacén de origen)."
-                  />
-                  <RestoreModeOption
-                    selected={deleteConfirm.mode === 'none'}
-                    onSelect={() => setMode('none')}
-                    title="No restaurar stock"
-                    description="Solo borrar el pedido. El stock no se reincorpora."
-                  />
-                </div>
-              )}
-
-              {hasItems && !isWebSale && (
+              {hasItems && (
                 <div className="space-y-2">
                   <p className="text-xs font-medium text-zinc-400">¿Qué hacer con el stock?</p>
 
