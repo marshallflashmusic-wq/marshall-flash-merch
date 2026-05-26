@@ -376,6 +376,30 @@ export async function DELETE(request: NextRequest) {
         }
       }
     }
+
+    // Restaurar stock por TALLA (product_variants.stock) en ventas presenciales
+    // rápidas y pedidos web. Las ventas de concierto NO se incluyen porque su
+    // talla se descontó al asignar al concierto, no al vender.
+    const { data: saleRow } = await supabase
+      .from('sales').select('event_id').eq('id', id).single()
+    if (!saleRow?.event_id) {
+      const { data: variantItems } = await supabase
+        .from('sale_items')
+        .select('variant_id, quantity')
+        .eq('sale_id', id)
+        .not('variant_id', 'is', null)
+      for (const it of variantItems ?? []) {
+        if (!it.variant_id) continue
+        const { data: v } = await supabase
+          .from('product_variants').select('stock').eq('id', it.variant_id).single()
+        if (v) {
+          await supabase
+            .from('product_variants')
+            .update({ stock: v.stock + it.quantity, updated_at: new Date().toISOString() })
+            .eq('id', it.variant_id)
+        }
+      }
+    }
   }
 
   // Restaurar warehouse_stock: plan del cliente si existe, si no auto-detección

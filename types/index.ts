@@ -148,6 +148,7 @@ export interface SaleItem {
   product?: Product
   pack_id?: string
   pack?: Pack
+  variant_id?: string | null
   quantity: number
   unit_price: number
   unit_cost: number

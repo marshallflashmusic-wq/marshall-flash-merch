@@ -69,6 +69,10 @@ export function useSales() {
       const saleItems = items.map(item => ({
         product_id: item.type === 'product' ? (item.product?.id ?? undefined) : undefined,
         pack_id:    item.type === 'pack'    ? (item.pack?.id    ?? undefined) : undefined,
+        // Persistimos la talla solo en líneas de producto individual.
+        // En packs con tallas, cada componente se descuenta en stockDecrements
+        // pero la línea agregada del pack no representa una sola talla.
+        variant_id: item.type === 'product' ? (item.variant_id ?? null) : null,
         quantity:   item.quantity,
         unit_price: item.unit_price,
         unit_cost:  item.unit_cost,
