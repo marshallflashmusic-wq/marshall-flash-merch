@@ -41,14 +41,11 @@ export default function DashboardPage() {
   useEffect(() => {
     const load = async () => {
       const supabase = createClient()
-      const today = new Date().toISOString().split('T')[0]
 
       const [salesRes, productsRes] = await Promise.all([
         supabase
           .from('sales')
-          .select('*, items:sale_items(*, product:products(name, purchase_price))')
-          .gte('created_at', today)
-          .lte('created_at', today + 'T23:59:59'),
+          .select('*, items:sale_items(*, product:products(name, purchase_price))'),
         supabase.from('products').select('id, name, stock, min_stock').eq('active', true),
       ])
 
@@ -206,7 +203,7 @@ export default function DashboardPage() {
               onClick={() => router.push('/sales/history')}
               className="w-full flex items-center justify-between mb-2 group"
             >
-              <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider group-hover:text-zinc-300 transition-colors">Más vendidos hoy</h2>
+              <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider group-hover:text-zinc-300 transition-colors">Más vendidos</h2>
               <span className="text-xs text-zinc-600 group-hover:text-zinc-400 transition-colors">Ver historial →</span>
             </button>
             <Card padding="none" interactive onClick={() => router.push('/sales/history')}>

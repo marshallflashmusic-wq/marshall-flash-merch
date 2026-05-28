@@ -860,18 +860,19 @@ function SortableProductCard({ product, canReorder, allocations, warehouseAlloca
                 </>
               )}
             </div>
-            {/* Etiquetas de almacén con color */}
-            {warehouseAllocations.length > 0 && (
-              <div className="flex flex-wrap gap-1 justify-end max-w-[180px]">
-                {(() => {
-                  // Agrupar por almacén (suma cantidades de todas las tallas)
-                  const grouped = new Map<string, { name: string; color: string; total: number }>()
-                  for (const w of warehouseAllocations) {
-                    const cur = grouped.get(w.warehouse_id)
-                    if (cur) cur.total += w.quantity
-                    else grouped.set(w.warehouse_id, { name: w.warehouse_name, color: w.warehouse_color, total: w.quantity })
-                  }
-                  return Array.from(grouped.entries()).map(([id, v]) => (
+            {/* Etiquetas de almacén con color — ocultas si solo hay 1 almacén (duplica el stock global) */}
+            {(() => {
+              if (warehouseAllocations.length === 0) return null
+              const grouped = new Map<string, { name: string; color: string; total: number }>()
+              for (const w of warehouseAllocations) {
+                const cur = grouped.get(w.warehouse_id)
+                if (cur) cur.total += w.quantity
+                else grouped.set(w.warehouse_id, { name: w.warehouse_name, color: w.warehouse_color, total: w.quantity })
+              }
+              if (grouped.size < 2) return null
+              return (
+                <div className="flex flex-wrap gap-1 justify-end max-w-[180px]">
+                  {Array.from(grouped.entries()).map(([id, v]) => (
                     <span
                       key={id}
                       title={`${v.name}: ${v.total} ud`}
@@ -882,10 +883,10 @@ function SortableProductCard({ product, canReorder, allocations, warehouseAlloca
                       <span className="truncate max-w-[80px]">{v.name}</span>
                       <span style={{ color: v.color }}>·{v.total}</span>
                     </span>
-                  ))
-                })()}
-              </div>
-            )}
+                  ))}
+                </div>
+              )
+            })()}
           </div>
         </div>
 
